@@ -1,0 +1,853 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "ios",
+        "request_binding": "vTk2Wcv+eA3IOmW5VxhhV/2Y8B0okOt1eHdkx3i1xyI="
+      },
+      "name": "ios websocket upgrade",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYSDBGAiEAsNLSkZS5iYtOJgPCNP3UQL/B5xwVvzMGWEnpJ4rrFUsCIQCSHA6zrGLcH3Z+sTQQDI+9vsqJ1ntW2cQ5jUehnRagBnFhdXRoZW50aWNhdG9yRGF0YVgl2mZiztHq8Ur2QuFQED8A9CuZYkZSvHUMhZbjujTberkBAAAAAQ==:"
+          ],
+          [
+            "connection",
+            "Upgrade"
+          ],
+          [
+            "upgrade",
+            "websocket"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "ios",
+        "request_binding": "3sfwWDxxqqRTURY1fnwCJEg/29FKsH2g4tfyTvSkGkE="
+      },
+      "name": "ios post with body and query",
+      "request": {
+        "body_base64": "eyJoZWxsbyI6IndvcmxkIn0=",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiBWvSPWeRM54Fy6GdhuWHezKeD5sBV0+pNl/azWVLPXuAIgEnIeHp1LXbI1CnAOL6+F8V+5nZuNCQTOkzaP0XaxR9VxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "POST",
+        "target": "/v1/config?sub=alice"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "android",
+        "request_binding": "RIbptF+dHO3pTRbyDHYC8dozN6LYf1G0ic+W7SCC8Eg="
+      },
+      "name": "android websocket upgrade",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ],
+          [
+            "connection",
+            "Upgrade"
+          ],
+          [
+            "upgrade",
+            "websocket"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "android",
+        "request_binding": "TK2R0ZNoHBpw2ec8Nl5GzICEHesZxjy7v2UzXRCWDZU="
+      },
+      "name": "android post with body and query",
+      "request": {
+        "body_base64": "eyJoZWxsbyI6IndvcmxkIn0=",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEUCIDVGRJZOishsFjKghHiRXEFNIZ1Xs6oa7NX5GTVu3KunAiEA6G2SRm3D8wrQ+wQwKc8PIrguDm5Q//P5ri4ZGZqnpdc=:"
+          ]
+        ],
+        "method": "POST",
+        "target": "/v1/config?sub=alice"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "ios",
+        "request_binding": "vTk2Wcv+eA3IOmW5VxhhV/2Y8B0okOt1eHdkx3i1xyI="
+      },
+      "name": "equivalent signature-input whitespace",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "  integrity=(\"@method\"   \"@scheme\"   \"@authority\"   \"@path\"   \"@query\"   \"content-digest\"   \"integrity-token\");created=1790000000; nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\"  "
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYSDBGAiEAsNLSkZS5iYtOJgPCNP3UQL/B5xwVvzMGWEnpJ4rrFUsCIQCSHA6zrGLcH3Z+sTQQDI+9vsqJ1ntW2cQ5jUehnRagBnFhdXRoZW50aWNhdG9yRGF0YVgl2mZiztHq8Ur2QuFQED8A9CuZYkZSvHUMhZbjujTberkBAAAAAQ==:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "android",
+        "request_binding": "bAO9g990V/mz1QS+RLj+n7dKjyLoCLgKb+8iLaab40Y="
+      },
+      "name": "parameters in another order",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");alg=\"world-integrity-android-v1\";created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\""
+          ],
+          [
+            "signature",
+            "integrity=:MEQCIDy5l3exan2hYyZj1/+BJ88m6zHXQKCKoo6+ur9tcKpqAiBWxdLCo+KM8FoRT6lxwopUbMgITtTw0v8SPQPc3Yz0LQ==:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_invalid",
+        "status": 403
+      },
+      "name": "signature over raw non-canonical signature-input",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\"  \"@scheme\"  \"@authority\"  \"@path\"  \"@query\"  \"content-digest\"  \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRzBFAiARGjkqIDPRU8G7tq3Ew7l3XtYSY1BCWt/zU8/2Slh7ugIhAPyYOoYj12IxRxcnpzPlrWMbLZe7QFUOZ+4nZd5RiU66cWF1dGhlbnRpY2F0b3JEYXRhWCXaZmLO0erxSvZC4VAQPwD0K5liRlK8dQyFluO6NNt6uQEAAAAB:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_invalid",
+        "status": 403
+      },
+      "name": "altered path",
+      "request": {
+        "body_base64": "eyJoZWxsbyI6IndvcmxkIn0=",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiBWvSPWeRM54Fy6GdhuWHezKeD5sBV0+pNl/azWVLPXuAIgEnIeHp1LXbI1CnAOL6+F8V+5nZuNCQTOkzaP0XaxR9VxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "POST",
+        "target": "/v1/other?sub=alice"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_invalid",
+        "status": 403
+      },
+      "name": "altered query",
+      "request": {
+        "body_base64": "eyJoZWxsbyI6IndvcmxkIn0=",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiBWvSPWeRM54Fy6GdhuWHezKeD5sBV0+pNl/azWVLPXuAIgEnIeHp1LXbI1CnAOL6+F8V+5nZuNCQTOkzaP0XaxR9VxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "POST",
+        "target": "/v1/config?sub=bob"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_invalid",
+        "status": 403
+      },
+      "name": "altered method",
+      "request": {
+        "body_base64": "eyJoZWxsbyI6IndvcmxkIn0=",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiBWvSPWeRM54Fy6GdhuWHezKeD5sBV0+pNl/azWVLPXuAIgEnIeHp1LXbI1CnAOL6+F8V+5nZuNCQTOkzaP0XaxR9VxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "PUT",
+        "target": "/v1/config?sub=alice"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_invalid",
+        "status": 403
+      },
+      "name": "altered body",
+      "request": {
+        "body_base64": "e30=",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiBWvSPWeRM54Fy6GdhuWHezKeD5sBV0+pNl/azWVLPXuAIgEnIeHp1LXbI1CnAOL6+F8V+5nZuNCQTOkzaP0XaxR9VxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "POST",
+        "target": "/v1/config?sub=alice"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_invalid",
+        "status": 403
+      },
+      "name": "signed for another authority",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYSDBGAiEA3424MwvgAD53FaVdWd1GPc7Pe1eoXDmiZnqent7FOxUCIQCM3LIOLIpjq9Bn1JVHOEB1zCYF//ZzGtqBr2WYBYWwVHFhdXRoZW50aWNhdG9yRGF0YVgl2mZiztHq8Ur2QuFQED8A9CuZYkZSvHUMhZbjujTberkBAAAAAQ==:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_invalid",
+        "status": 403
+      },
+      "name": "integrity token for another device",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiIwMzJwNlBfalgyNHBkdm5TdjJOeXBCczJXZTdzaXotcmE0UTY4NjlCUWh3IiwieSI6InNDVnVhSWM1MS1aZjlTSHJRQWdZZHRNTXp0a19VRTcwSW15VmczcmpNVTAifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.cmMDAjbUcnkFvPZGXsH0_sHgmYyVG8Mvg6XCXglcBq5oiyX2yKYTpV5Zwda1JF1pim30pNt-ulK2XgajUCZ5nQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYSDBGAiEAsNLSkZS5iYtOJgPCNP3UQL/B5xwVvzMGWEnpJ4rrFUsCIQCSHA6zrGLcH3Z+sTQQDI+9vsqJ1ntW2cQ5jUehnRagBnFhdXRoZW50aWNhdG9yRGF0YVgl2mZiztHq8Ur2QuFQED8A9CuZYkZSvHUMhZbjujTberkBAAAAAQ==:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "alg_mismatch",
+        "status": 401
+      },
+      "name": "alg does not match the attested platform",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.488Tu-SH7FaQnkx2LsFm2km2xFircvDZEsWfJh1tLLcdCj2pkPldQYk2RRFKiOBVjgxkIDlX_rP6kO1lKHM6WQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYSDBGAiEAve94eMGVsHexSCdWbwlrItonmYWvbCfg9zjIVv9Qk4cCIQDaHECSvvDg6LwHRdcgrCr2hX+08mCtg4OIaD5spyDPsHFhdXRoZW50aWNhdG9yRGF0YVgl2mZiztHq8Ur2QuFQED8A9CuZYkZSvHUMhZbjujTberkBAAAAAQ==:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "ios",
+        "request_binding": "ld7Nfl7e/HQs2sBLFQndMQhnsRqVkKg9XZ2YzLVMM+8="
+      },
+      "name": "created at the maximum age",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1789999700;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRzBFAiBjjsJdVJ/ej9gMXnPPFMA/rBOcZmnPc+rHA3GrOxwiLwIhAJWX9g4C+yyaKNHwOnVn29e2zFhZRBoFJaS+Vdla7kEWcWF1dGhlbnRpY2F0b3JEYXRhWCXaZmLO0erxSvZC4VAQPwD0K5liRlK8dQyFluO6NNt6uQEAAAAB:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "created_too_old",
+        "status": 401
+      },
+      "name": "created past the maximum age",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1789999699;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRzBFAiBShvoHKXkonzdxxAzq9vUtawNABdONlJ0k6kyHcsSfgwIhAMQRMe51fEct6x0bY4QjEoz/1AIrv0veMxp+zv+lZT6wcWF1dGhlbnRpY2F0b3JEYXRhWCXaZmLO0erxSvZC4VAQPwD0K5liRlK8dQyFluO6NNt6uQEAAAAB:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "verified",
+        "platform": "ios",
+        "request_binding": "SXU5GIRUtr64/8ANTi9cXDW7Zr242QYH6M8JoqK4YPE="
+      },
+      "name": "created at the maximum future skew",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000060;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiAelneLN4Wz5hzhyCIU3DqHi9fuUKbTua9/68D2OsSgowIgA1wftDJBpMtxctj9zlfVcC+9rhBfOPibdejiymL2UxJxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "created_too_far_in_future",
+        "status": 401
+      },
+      "name": "created past the maximum future skew",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.E-q54iaaaNGwhWeWvkGsmgRL0NM-4Ep4StVnEgPET7CIol1G-zTtb5ReGF0tUBr7H1o4v5qr9Btkz-fOwm8SEA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000061;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiAeleLFA8lJIgy0ltDn44d+gWIaSRRHtlT3cXHpXF8f4gIgWuZz1gSL78FTlhgbRZI3hctl15WjQyX53skoQDcwB0dxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "integrity_token_invalid",
+        "status": 401
+      },
+      "name": "expired integrity token",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMDAwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJpb3MifQ.unbFNgz2Q4YN1ZdpjZxOY5HoLSKt5njJ2JWM4V8RkTBUuey3m3b1mKQMYE7V9gBWMuwxqIOZW-uT5kas4hQYIg"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRzBFAiBka2OBB/YMpbfzFvNGQkDFxgLzwuFtunULdZKRCRY5SQIhAJS7t/syt+Xp0jyLYH75Mp2++okSTioDPc9FK/MK9BS0cWF1dGhlbnRpY2F0b3JEYXRhWCXaZmLO0erxSvZC4VAQPwD0K5liRlK8dQyFluO6NNt6uQEAAAAB:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "integrity_token_invalid",
+        "status": 401
+      },
+      "name": "integrity token for another audience",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmYWNlLWF1dGgiLCJjbmYiOnsiandrIjp7ImNydiI6IlAtMjU2Iiwia3R5IjoiRUMiLCJ4IjoiNndJTThaOUhESXYxaUJnZXBTZk5TelRIbnQ5bVdrQzA2QTJaVGdid3MtMCIsInkiOiJuNm81aU11T1BwcU5FTV9ZcDg5VVFqMy13SUxmc1ROaHNIUUhpMGVMV0tzIn19LCJleHAiOjE3OTAwMDM2MDAsImlzcyI6Imh0dHBzOi8vYXR0ZXN0YXRpb24uZXhhbXBsZSIsInBhc3MiOnRydWUsInBsYXRmb3JtIjoiaW9zIn0.MguDyMW449CXLaiYa8HlKb345SCyt_KJ_K4fs4aY_y68ZAalNxewnbXUgvNMuKI-DPd0UlXhmDqH9rJNq3aT4A"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRjBEAiAdod9Kya/x4BeW0Z6gO402iShj6dMCW0MNrnqydBnHWQIgHjjyhwpRdBiIyfRwTmC9emLNIGWZkGIfuylni3WLn4ZxYXV0aGVudGljYXRvckRhdGFYJdpmYs7R6vFK9kLhUBA/APQrmWJGUrx1DIWW47o023q5AQAAAAE=:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "device_integrity_failed",
+        "status": 403
+      },
+      "name": "device failed attestation",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6ZmFsc2UsInBsYXRmb3JtIjoiaW9zIn0.57cpNWe1ac0k7KtWP-179uc_-rgHVFthmNHVNnEsXWHcee3wVWpmACcDI4pFQ95ZurUQyW_-B2OXutAF_R8nyA"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYSDBGAiEAtT4Lp6gs6QzEhVRkfDoKb5kVmAYxHRIg6sWNJPBy12sCIQDSJKOWX9BlMJ7MM2Kd/f8w7W74jFWcZpElUBHJgF9c9nFhdXRoZW50aWNhdG9yRGF0YVgl2mZiztHq8Ur2QuFQED8A9CuZYkZSvHUMhZbjujTberkBAAAAAQ==:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "integrity_token_invalid",
+        "status": 401
+      },
+      "name": "integrity token without a verdict",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiI2d0lNOFo5SERJdjFpQmdlcFNmTlN6VEhudDltV2tDMDZBMlpUZ2J3cy0wIiwieSI6Im42bzVpTXVPUHBxTkVNX1lwODlVUWozLXdJTGZzVE5oc0hRSGkwZUxXS3MifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGxhdGZvcm0iOiJpb3MifQ.sEX7RM1vAKNactQV_ypDYfr28g6BXPkTimbIoSySv_i43cdwP3dclGWfYk2_dBnuO-8N-OpX_LckqXmnb2inng"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-ios-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:omlzaWduYXR1cmVYRzBFAiEAntBgPetQ5HbW0hlTLYZhw/HtKwvHbggbr6ZBIiT3RnACIA0+W62wjo4WURgrj5/a6Xy5zMRW55V+H4BOStcPagJ1cWF1dGhlbnRpY2F0b3JEYXRhWCXaZmLO0erxSvZC4VAQPwD0K5liRlK8dQyFluO6NNt6uQEAAAAB:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "headers_missing",
+        "status": 401
+      },
+      "name": "missing signature",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-android-v1\""
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "integrity_token_invalid",
+        "status": 401
+      },
+      "name": "repeated integrity-token header",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ],
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_input_malformed",
+        "status": 400
+      },
+      "name": "keyid parameter",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";keyid=\"device\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_input_malformed",
+        "status": 400
+      },
+      "name": "tag parameter",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";tag=\"weak\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_input_malformed",
+        "status": 400
+      },
+      "name": "second signature label",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-android-v1\", sig2=(\"@method\");created=1"
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "component_missing",
+        "status": 400
+      },
+      "name": "query not covered",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "signature_base_incomplete",
+        "status": 400
+      },
+      "name": "unsigned header covered",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"user-agent\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8SNFZ4kA==\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    },
+    {
+      "expected": {
+        "outcome": "rejected",
+        "reason": "nonce_invalid",
+        "status": 400
+      },
+      "name": "nonce shorter than 16 bytes",
+      "request": {
+        "body_base64": "",
+        "headers": [
+          [
+            "integrity-token",
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJmbGFtaW5nby12ZXJpZmllciIsImNuZiI6eyJqd2siOnsiY3J2IjoiUC0yNTYiLCJrdHkiOiJFQyIsIngiOiJFdEJNT3V6RzRWWlZ3dDhZMkpGWHBILUZ0TVl1bl85NUNrUm1mRHZvTGx3IiwieSI6IlBwOU9rOE9KamVOWnJvd3FoVi1Ub2FGUy1JejB6Wi1NYk40ZjFoZHFtZ28ifX0sImV4cCI6MTc5MDAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hdHRlc3RhdGlvbi5leGFtcGxlIiwicGFzcyI6dHJ1ZSwicGxhdGZvcm0iOiJhbmRyb2lkIn0.9RLKOuwkvjMX-te0gS6UZvc3cV85G512MrtshlcGhzdWvkzslNBjmC1Z_Tx99Zv4Ygcf0_UHn73frY2FMRDkjQ"
+          ],
+          [
+            "signature-input",
+            "integrity=(\"@method\" \"@scheme\" \"@authority\" \"@path\" \"@query\" \"content-digest\" \"integrity-token\");created=1790000000;nonce=\"q83vEjRWeJCrze8=\";alg=\"world-integrity-android-v1\""
+          ],
+          [
+            "signature",
+            "integrity=:MEYCIQCB4PFQWqcexFA3M3zOaS2iqTdHbPVhnQjxKFVA3RaSwwIhAJaeAEsuzSCtl9tMySozWB4Xi7aO98J0UV0A3WnqPkiw:"
+          ]
+        ],
+        "method": "GET",
+        "target": "/v1/matches"
+      }
+    }
+  ],
+  "config": {
+    "audience": "flamingo-verifier",
+    "authority": "flamingo-verifier.toolsforhumanity.com",
+    "issuer": "https://attestation.example",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "ES256",
+          "crv": "P-256",
+          "kid": "test-key-1",
+          "kty": "EC",
+          "use": "sig",
+          "x": "40Hy6EQJK8UzOairgK487cioK-rGO3kJ9r7ZZLP_GsI",
+          "y": "DTukk9byubBi6mfHY01ZJxpmWS6mWN9udjB0zU8Z514"
+        }
+      ]
+    },
+    "max_age_secs": 300,
+    "max_future_skew_secs": 60,
+    "now": 1790000000,
+    "scheme": "https"
+  },
+  "description": "End-to-end requests for the TFH integrity profile and the verdict a verifier must reach. Replay tracking is stateful and not covered. Generated by `cargo run -p attested-request --example generate-vectors --features test-util`."
+}

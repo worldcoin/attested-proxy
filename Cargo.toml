@@ -1,0 +1,55 @@
+[workspace]
+members = ["crates/attested-request"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.98.1"
+version = "0.1.0"
+license = "MIT"
+homepage = "https://github.com/worldcoin/attested-proxy"
+repository = "https://github.com/worldcoin/attested-proxy"
+
+[workspace.dependencies]
+attested-request = { version = "0.1.0", path = "crates/attested-request" }
+attested-request-tower = { version = "0.1.0", path = "crates/attested-request-tower" }
+
+arc-swap = "1.7"
+axum = { version = "0.8", default-features = false }
+base64 = "0.22"
+bytes = "1"
+ciborium = "0.2"
+clap = { version = "4", features = ["derive", "env"] }
+getrandom = { version = "0.3", features = ["std"] }
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+hyper = "1"
+hyper-util = "0.1"
+metrics = "0.24"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+rand = "0.8"
+redis = { version = "1", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_json = "1"
+sfv = "0.15"
+sha2 = "0.10"
+telemetry-batteries = { version = "0.4.1", default-features = false }
+thiserror = "2"
+tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = "0.29"
+tower = { version = "0.5", default-features = false }
+tracing = "0.1"
+wiremock = "0.6"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
