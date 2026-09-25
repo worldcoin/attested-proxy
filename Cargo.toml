@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/attested-request"]
+members = [
+    "crates/attested-request",
+    "crates/attested-request-tower",
+]
 resolver = "3"
 
 [workspace.package]

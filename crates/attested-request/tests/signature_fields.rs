@@ -100,114 +100,127 @@ fn accessors_expose_the_parsed_values() {
     assert_eq!(params.alg(), "world-integrity-ios-v1");
 }
 
+fn assert_refused(cases: &[(&str, String, SignatureInputError)]) {
+    for (name, field, expected) in cases {
+        assert_eq!(
+            SignatureParams::parse(field).as_ref(),
+            Err(expected),
+            "{name}"
+        );
+    }
+}
+
+const VALID_PARAMS: &str = r#";created=1;nonce="n";alg="a""#;
+
+fn with_params(params: &str) -> String {
+    format!(
+        r#"integrity=("@method" "@scheme" "@authority" "@path" "@query" "content-digest" "integrity-token"){params}"#
+    )
+}
+
+fn with_components(components: &str) -> String {
+    format!("integrity=({components}){VALID_PARAMS}")
+}
+
 #[test]
-fn profile_violations_are_refused() {
-    let with_params = |params: &str| {
-        format!(
-            r#"integrity=("@method" "@scheme" "@authority" "@path" "@query" "content-digest" "integrity-token"){params}"#
-        )
-    };
-    let valid_params = r#";created=1;nonce="n";alg="a""#;
-    let cases = [
-        (
-            "not a dictionary",
-            "(((".to_owned(),
-            SignatureInputError::Syntax,
-        ),
+fn dictionary_and_component_violations_are_refused() {
+    use SignatureInputError as E;
+    assert_refused(&[
+        ("not a dictionary", "(((".to_owned(), E::Syntax),
         (
             "wrong label",
             REFERENCE_INPUT.replacen("integrity=", "sig1=", 1),
-            SignatureInputError::Label,
+            E::Label,
         ),
         (
             "second member",
             format!("{REFERENCE_INPUT}, sig2=(\"@method\");created=1"),
-            SignatureInputError::Label,
+            E::Label,
         ),
         (
             "item, not inner list",
             r#"integrity="@method";created=1"#.to_owned(),
-            SignatureInputError::NotInnerList,
+            E::NotInnerList,
         ),
-        (
-            "empty inner list",
-            format!("integrity=(){valid_params}"),
-            SignatureInputError::NotInnerList,
-        ),
+        ("empty inner list", with_components(""), E::NotInnerList),
         (
             "token component",
-            format!("integrity=(method){valid_params}"),
-            SignatureInputError::ComponentForm,
+            with_components("method"),
+            E::ComponentForm,
         ),
         (
             "component parameter",
-            format!(r#"integrity=("@query";name="a"){valid_params}"#),
-            SignatureInputError::ComponentForm,
+            with_components(r#""@query";name="a""#),
+            E::ComponentForm,
         ),
         (
             "duplicate component",
-            format!(r#"integrity=("@method" "@method"){valid_params}"#),
-            SignatureInputError::DuplicateComponent(Component::Method),
+            with_components(r#""@method" "@method""#),
+            E::DuplicateComponent(Component::Method),
         ),
         (
-            "unsigned header component",
-            format!(r#"integrity=("user-agent"){valid_params}"#),
-            SignatureInputError::UnsupportedComponent,
+            "unsigned header",
+            with_components(r#""user-agent""#),
+            E::UnsupportedComponent,
         ),
         (
-            "uppercase header component",
-            format!(r#"integrity=("Integrity-Token"){valid_params}"#),
-            SignatureInputError::UnsupportedComponent,
+            "uppercase header",
+            with_components(r#""Integrity-Token""#),
+            E::UnsupportedComponent,
         ),
+    ]);
+}
+
+#[test]
+fn parameter_violations_are_refused() {
+    use SignatureInputError as E;
+    assert_refused(&[
         (
             "keyid",
             with_params(r#";created=1;nonce="n";alg="a";keyid="k""#),
-            SignatureInputError::UnexpectedParameter,
+            E::UnexpectedParameter,
         ),
         (
             "tag",
             with_params(r#";created=1;nonce="n";alg="a";tag="t""#),
-            SignatureInputError::UnexpectedParameter,
+            E::UnexpectedParameter,
         ),
         (
             "missing created",
             with_params(r#";nonce="n";alg="a""#),
-            SignatureInputError::MissingParameter(Param::Created),
+            E::MissingParameter(Param::Created),
         ),
         (
             "missing nonce",
             with_params(r#";created=1;alg="a""#),
-            SignatureInputError::MissingParameter(Param::Nonce),
+            E::MissingParameter(Param::Nonce),
         ),
         (
             "missing alg",
             with_params(r#";created=1;nonce="n""#),
-            SignatureInputError::MissingParameter(Param::Alg),
+            E::MissingParameter(Param::Alg),
         ),
         (
             "zero created",
             with_params(r#";created=0;nonce="n";alg="a""#),
-            SignatureInputError::InvalidParameter(Param::Created),
+            E::InvalidParameter(Param::Created),
         ),
         (
             "string created",
             with_params(r#";created="1";nonce="n";alg="a""#),
-            SignatureInputError::InvalidParameter(Param::Created),
+            E::InvalidParameter(Param::Created),
         ),
         (
             "token nonce",
             with_params(r#";created=1;nonce=n;alg="a""#),
-            SignatureInputError::InvalidParameter(Param::Nonce),
+            E::InvalidParameter(Param::Nonce),
         ),
         (
             "empty alg",
             with_params(r#";created=1;nonce="n";alg="""#),
-            SignatureInputError::InvalidParameter(Param::Alg),
+            E::InvalidParameter(Param::Alg),
         ),
-    ];
-    for (name, field, expected) in cases {
-        assert_eq!(SignatureParams::parse(&field), Err(expected), "{name}");
-    }
+    ]);
 }
 
 #[test]

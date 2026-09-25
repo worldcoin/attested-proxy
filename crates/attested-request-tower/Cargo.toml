@@ -1,0 +1,41 @@
+[package]
+name = "attested-request-tower"
+description = "tower and axum middleware that verifies World App attested-key canonical requests."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords = ["rfc9421", "tower", "axum", "middleware", "attestation"]
+categories = ["authentication", "web-programming::http-server"]
+
+[features]
+default = []
+# An axum extractor for the verified context.
+axum = ["dep:axum"]
+
+[dependencies]
+attested-request.workspace = true
+axum = { workspace = true, optional = true }
+bytes.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+metrics.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tower.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+attested-request = { workspace = true, features = ["test-util"] }
+attested-request-tower = { path = ".", features = ["axum"] }
+axum = { workspace = true }
+futures-util = "0.3"
+serde_json.workspace = true
+tokio.workspace = true
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true
