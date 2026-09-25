@@ -19,6 +19,7 @@ use anyhow::Context as _;
 use attested_request::{
     Verifier,
     remote_jwks::{RemoteJwks, RemoteJwksConfig},
+    replay::ReplayGuard,
     token::TokenVerifier,
 };
 use http::Uri;
@@ -84,8 +85,7 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
         .max_age(Duration::from_secs(config.max_age_secs))
         .max_future_skew(Duration::from_secs(config.max_future_skew_secs));
     if let Some(url) = &config.replay_redis_url {
-        verifier =
-            verifier.replay_guard(Arc::new(replay_guard(url, config.replay_timeout_ms).await?));
+        verifier = verifier.replay_guard(replay_guard(url, config.replay_timeout_ms).await?);
     }
     let verifier = Arc::new(
         verifier
@@ -130,17 +130,19 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "redis")]
-async fn replay_guard(
-    url: &str,
-    timeout_ms: u64,
-) -> anyhow::Result<redis_replay::RedisReplayGuard> {
-    redis_replay::RedisReplayGuard::connect(url, Duration::from_millis(timeout_ms))
+async fn replay_guard(url: &str, timeout_ms: u64) -> anyhow::Result<Arc<dyn ReplayGuard>> {
+    let guard = redis_replay::RedisReplayGuard::connect(url, Duration::from_millis(timeout_ms))
         .await
-        .context("connecting to the replay store")
+        .context("connecting to the replay store")?;
+    Ok(Arc::new(guard))
 }
 
 #[cfg(not(feature = "redis"))]
-async fn replay_guard(_: &str, _: u64) -> anyhow::Result<std::convert::Infallible> {
+#[allow(
+    clippy::unused_async,
+    reason = "matches the signature of the redis variant"
+)]
+async fn replay_guard(_: &str, _: u64) -> anyhow::Result<Arc<dyn ReplayGuard>> {
     anyhow::bail!("replay tracking needs the `redis` feature")
 }
 
