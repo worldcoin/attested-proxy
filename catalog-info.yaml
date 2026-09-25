@@ -1,0 +1,19 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  annotations:
+    github.com/project-slug: worldcoin/attested-proxy
+  tags: ['code-lang:rust']
+  description: Attested-key canonical request verification sidecar and crates.
+  links:
+    - title: Linear
+      url: PLACEHOLDER-ADD-LINEAR-URL
+    - title: Documentation
+      url: PLACEHOLDER-ADD-DOCUMENTATION-URL
+    - title: Slack
+      url: PLACEHOLDER-ADD-SLACK-URL
+  name: attested-proxy
+spec:
+  lifecycle: experimental
+  owner: team-protocol
+  type: service
