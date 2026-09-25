@@ -1,0 +1,104 @@
+{
+  description = "attested-proxy: attested-key canonical request verification for World App";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    crane.url = "github:ipetkov/crane";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
+    {
+      nixpkgs,
+      crane,
+      rust-overlay,
+      ...
+    }:
+    let
+      lib = nixpkgs.lib;
+      forAllSystems = lib.genAttrs [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+      perSystem = forAllSystems (
+        system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ rust-overlay.overlays.default ];
+          };
+          toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          craneLib = (crane.mkLib pkgs).overrideToolchain (_: toolchain);
+
+          # The shared vectors are read by the tests, so they are part of the source.
+          src = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              (craneLib.fileset.commonCargoSources ./.)
+              ./test-vectors
+            ];
+          };
+          commonArgs = {
+            inherit src;
+            strictDeps = true;
+            pname = "attested-proxy";
+            buildInputs = lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
+          };
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+          attested-proxy = craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs = "--package attested-proxy";
+              # Tests run once, for the whole workspace, in `checks.test`.
+              doCheck = false;
+              meta.mainProgram = "attested-proxy";
+            }
+          );
+        in
+        {
+          packages.default = attested-proxy;
+
+          checks = {
+            inherit attested-proxy;
+            clippy = craneLib.cargoClippy (
+              commonArgs
+              // {
+                inherit cargoArtifacts;
+                cargoClippyExtraArgs = "--workspace --all-targets --all-features -- --deny warnings";
+              }
+            );
+            test = craneLib.cargoTest (
+              commonArgs
+              // {
+                inherit cargoArtifacts;
+                cargoTestExtraArgs = "--workspace --all-features";
+                # The tests talk to mock servers on loopback.
+                __darwinAllowLocalNetworking = true;
+              }
+            );
+            fmt = craneLib.cargoFmt { inherit src; };
+          };
+
+          devShells.default = craneLib.devShell {
+            packages = [
+              pkgs.python3 # test-vectors/generate_signature_base.py
+              pkgs.redis # a local replay store
+              pkgs.jq
+            ];
+          };
+        }
+      );
+    in
+    {
+      packages = lib.mapAttrs (_: outputs: outputs.packages) perSystem;
+      checks = lib.mapAttrs (_: outputs: outputs.checks) perSystem;
+      devShells = lib.mapAttrs (_: outputs: outputs.devShells) perSystem;
+    };
+}
