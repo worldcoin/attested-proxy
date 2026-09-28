@@ -50,9 +50,23 @@
             buildInputs = lib.optionals pkgs.stdenv.isDarwin [ pkgs.libiconv ];
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+          attested-proxy = craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs = "--package attested-proxy";
+              # Tests run once, for the whole workspace, in `checks.test`.
+              doCheck = false;
+              meta.mainProgram = "attested-proxy";
+            }
+          );
         in
         {
+          packages.default = attested-proxy;
+
           checks = {
+            inherit attested-proxy;
             clippy = craneLib.cargoClippy (
               commonArgs
               // {
@@ -75,12 +89,15 @@
           devShells.default = craneLib.devShell {
             packages = [
               pkgs.python3 # test-vectors/generate_signature_base.py
+              pkgs.redis # a local replay store
+              pkgs.jq
             ];
           };
         }
       );
     in
     {
+      packages = lib.mapAttrs (_: outputs: outputs.packages) perSystem;
       checks = lib.mapAttrs (_: outputs: outputs.checks) perSystem;
       devShells = lib.mapAttrs (_: outputs: outputs.devShells) perSystem;
     };

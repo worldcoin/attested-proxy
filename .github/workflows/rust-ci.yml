@@ -59,6 +59,16 @@ jobs:
             > test-vectors/verification.json
           git diff --exit-code -- test-vectors
 
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: docker build --tag attested-proxy:ci .
+
   flake:
     name: flake check
     runs-on: ubuntu-latest
