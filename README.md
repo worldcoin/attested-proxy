@@ -21,6 +21,9 @@ does not identify a user, a PCP owner or a relying party, and it authorizes noth
   their signatures today; only this one also accepts equivalent spellings, such as extra
   whitespace, that Structured Fields allows.
 - **`@scheme` and `@authority` come from configuration**, never from the `Host` header.
+- iOS assertions are checked against `cnf.jwk` only. Their rpId and counter are not checked: App
+  Attest keys are app-scoped, the gateway verified the app when it attested the key, and
+  freshness comes from `created`.
 
 ## Test vectors
 
