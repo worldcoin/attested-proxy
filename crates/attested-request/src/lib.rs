@@ -11,3 +11,9 @@
 //!
 //! Verification proves that an attested app on an attested device signed this exact request. It
 //! does not identify a user or authorize access to anything.
+
+pub mod base;
+pub mod profile;
+pub mod signature;
+
+pub use crate::profile::{Component, Platform};
