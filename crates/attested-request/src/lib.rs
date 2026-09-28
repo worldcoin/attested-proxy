@@ -7,7 +7,8 @@
 //! signature with the attested key.
 //!
 //! This crate implements the TFH RFC 9421 integrity request signing profile. It has no
-//! transport.
+//! transport: [`verify::Verifier`] takes a request head and body, and [`sign`] produces the
+//! headers for a request.
 //!
 //! Verification proves that an attested app on an attested device signed this exact request. It
 //! does not identify a user or authorize access to anything.
@@ -15,10 +16,17 @@
 pub mod base;
 pub mod device;
 pub mod profile;
+pub mod reject;
+pub mod replay;
 pub mod sign;
 pub mod signature;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 pub mod token;
+pub mod verify;
 
-pub use crate::profile::{Component, Platform};
+pub use crate::{
+    profile::{Component, Platform},
+    reject::{RejectReason, Rejection},
+    verify::{VerifiedAttestedKeyContext, Verifier},
+};
