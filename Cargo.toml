@@ -2,6 +2,7 @@
 members = [
     "crates/attested-request",
     "crates/attested-request-tower",
+    "crates/attested-proxy",
 ]
 resolver = "3"
 
@@ -15,6 +16,7 @@ repository = "https://github.com/worldcoin/attested-proxy"
 
 [workspace.dependencies]
 attested-request = { version = "0.1.0", path = "crates/attested-request" }
+attested-request-tower = { version = "0.1.0", path = "crates/attested-request-tower" }
 
 arc-swap = "1.7"
 axum = { version = "0.8", default-features = false }
@@ -28,6 +30,7 @@ jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc
 http-body = "1"
 http-body-util = "0.1"
 hyper = "1"
+hyper-util = "0.1"
 metrics = "0.24"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
@@ -38,6 +41,8 @@ sfv = "0.15"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = "0.29"
+tokio-util = "0.7"
 tower = { version = "0.5", default-features = false }
 tracing = "0.1"
 wiremock = "0.6"
