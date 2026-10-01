@@ -69,6 +69,7 @@ impl Request {
             .split_once('?')
             .map_or((self.target, None), |(path, query)| (path, Some(query)));
         CanonicalRequest::new(self.method, "https", authority, path, query, self.body)
+            .expect("valid fixture authority")
     }
 }
 
