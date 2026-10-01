@@ -1,10 +1,19 @@
 //! The shared test vectors in `test-vectors/`, which other implementations run too.
 
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
+
 use attested_request::{
+    Verifier,
     base::{CanonicalRequest, ComponentValues},
     signature::SignatureParams,
+    token::{StaticKeys, TokenVerifier},
+    verify::FixedClock,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use http::Request;
 use serde_json::Value;
 
 fn load(json: &str) -> Value {
@@ -62,5 +71,74 @@ fn signature_base_vectors() {
             text(&expected["content-digest"]),
             "{name}"
         );
+    }
+}
+
+#[tokio::test]
+async fn verification_vectors() {
+    let vectors = load(include_str!("../../../test-vectors/verification.json"));
+    let config = &vectors["config"];
+    let keys = StaticKeys::from_jwks(config["jwks"].to_string().as_bytes()).unwrap();
+    let tokens = TokenVerifier::new(
+        [(text(&config["issuer"]).to_owned(), Arc::new(keys) as _)],
+        [text(&config["audience"]).to_owned()],
+    )
+    .unwrap();
+    let seconds = |key: &str| Duration::from_secs(config[key].as_u64().unwrap());
+    let verifier = Verifier::builder(tokens, text(&config["authority"]))
+        .scheme(text(&config["scheme"]))
+        .max_age(seconds("max_age_secs"))
+        .max_future_skew(seconds("max_future_skew_secs"))
+        .clock(Arc::new(FixedClock(
+            SystemTime::UNIX_EPOCH + seconds("now"),
+        )))
+        .build()
+        .unwrap();
+
+    let cases = vectors["cases"].as_array().unwrap();
+    assert!(cases.len() >= 30);
+    for case in cases {
+        let name = text(&case["name"]);
+        let request = &case["request"];
+        let mut builder = Request::builder()
+            .method(text(&request["method"]))
+            .uri(text(&request["target"]));
+        for header in request["headers"].as_array().unwrap() {
+            builder = builder.header(text(&header[0]), text(&header[1]));
+        }
+        let (parts, ()) = builder.body(()).unwrap().into_parts();
+        let body = STANDARD.decode(text(&request["body_base64"])).unwrap();
+
+        let expected = &case["expected"];
+        match (
+            verifier.verify(&parts, &body).await,
+            text(&expected["outcome"]),
+        ) {
+            (Ok(context), "verified") => {
+                assert_eq!(
+                    context.device.platform.as_str(),
+                    text(&expected["platform"]),
+                    "{name}"
+                );
+                assert_eq!(
+                    context.request_binding,
+                    text(&expected["request_binding"]),
+                    "{name}"
+                );
+            }
+            (Err(rejection), "rejected") => {
+                assert_eq!(
+                    rejection.reason.as_str(),
+                    text(&expected["reason"]),
+                    "{name}"
+                );
+                assert_eq!(
+                    u64::from(rejection.reason.status().as_u16()),
+                    expected["status"].as_u64().unwrap(),
+                    "{name}"
+                );
+            }
+            (outcome, _) => panic!("{name}: expected {expected}, got {outcome:?}"),
+        }
     }
 }

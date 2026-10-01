@@ -55,6 +55,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 test-vectors/generate_signature_base.py
+          cargo run --locked --quiet -p attested-request --example generate-vectors --features test-util \
+            > test-vectors/verification.json
           git diff --exit-code -- test-vectors
 
   flake:

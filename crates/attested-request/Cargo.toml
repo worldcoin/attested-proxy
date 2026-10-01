@@ -33,5 +33,9 @@ thiserror.workspace = true
 attested-request = { path = ".", features = ["test-util"] }
 tokio.workspace = true
 
+[[example]]
+name = "generate-vectors"
+required-features = ["test-util"]
+
 [lints]
 workspace = true
