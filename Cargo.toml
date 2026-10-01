@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/attested-request"]
+members = [
+    "crates/attested-request",
+    "crates/attested-request-tower",
+]
 resolver = "3"
 
 [workspace.package]
@@ -11,12 +14,21 @@ homepage = "https://github.com/worldcoin/attested-proxy"
 repository = "https://github.com/worldcoin/attested-proxy"
 
 [workspace.dependencies]
+attested-request = { version = "0.1.0", path = "crates/attested-request" }
+
 arc-swap = "1.7"
+axum = { version = "0.8", default-features = false }
 base64 = "0.22"
+bytes = "1"
 ciborium = "0.2"
+futures-util = "0.3"
 getrandom = { version = "0.3", features = ["std"] }
 http = "1"
 jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
+http-body = "1"
+http-body-util = "0.1"
+hyper = "1"
+metrics = "0.24"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
@@ -26,6 +38,7 @@ sfv = "0.15"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { version = "0.5", default-features = false }
 tracing = "0.1"
 wiremock = "0.6"
 

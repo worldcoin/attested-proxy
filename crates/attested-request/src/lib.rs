@@ -8,7 +8,7 @@
 //!
 //! This crate implements the TFH RFC 9421 integrity request signing profile. It has no
 //! transport: [`verify::Verifier`] takes a request head and body, and [`sign`] produces the
-//! headers for a request.
+//! headers for a request. `attested-request-tower` adapts it to tower and axum.
 //!
 //! Verification proves that an attested app on an attested device signed this exact request. It
 //! does not identify a user or authorize access to anything.

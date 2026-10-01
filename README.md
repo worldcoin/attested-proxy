@@ -13,6 +13,23 @@ Verification proves that **an attested app on an attested device signed this exa
 does not identify a user, a PCP owner or a relying party, and it authorizes nothing. See
 [Authorized Principal] for that layer.
 
+## Crates
+
+| Crate | Use it to |
+| --- | --- |
+| [`attested-request`](crates/attested-request) | Sign and verify canonical requests without any transport. Types, `Signature-Input` parsing and canonical serialization, the signature base, Attestation Gateway token verification (ES256 only), iOS App Attest and Android signature checks, a `Signer` trait for clients, an optional replay guard. The `remote-jwks` feature adds a cached HTTPS JWKS; `test-util` adds software signers and a fake gateway. |
+| [`attested-request-tower`](crates/attested-request-tower) | Verify in-process, in any tower or axum service. `AttestedRequestLayer` puts a `VerifiedAttestedKeyContext` in the request extensions; the `axum` feature adds the `AttestedKey` extractor. |
+
+```rust
+let app = axum::Router::new()
+    .route("/v1/config", axum::routing::post(handler))
+    .route_layer(AttestedRequestLayer::new(Arc::new(verifier)));
+
+async fn handler(AttestedKey(context): AttestedKey) -> String {
+    format!("{} device {}", context.device.platform, context.device.key.thumbprint())
+}
+```
+
 ## Profile notes
 
 - **`@signature-params` is serialized, not copied.** RFC 9421 §3.2 step 7 builds it by
