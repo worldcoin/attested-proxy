@@ -10,16 +10,28 @@ repository.workspace = true
 keywords = ["rfc9421", "http-signatures", "app-attest", "attestation"]
 categories = ["authentication", "cryptography", "web-programming::http-server"]
 
+[features]
+default = []
+# Software signers and a fake Attestation Gateway, for tests in this and downstream crates.
+test-util = []
+
 [dependencies]
 base64.workspace = true
+ciborium.workspace = true
 getrandom.workspace = true
 http.workspace = true
+jsonwebtoken.workspace = true
+p256.workspace = true
+serde.workspace = true
+serde_bytes.workspace = true
+serde_json.workspace = true
 sfv.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+attested-request = { path = ".", features = ["test-util"] }
+tokio.workspace = true
 
 [lints]
 workspace = true

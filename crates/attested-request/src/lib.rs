@@ -13,7 +13,12 @@
 //! does not identify a user or authorize access to anything.
 
 pub mod base;
+pub mod device;
 pub mod profile;
+pub mod sign;
 pub mod signature;
+#[cfg(feature = "test-util")]
+pub mod test_util;
+pub mod token;
 
 pub use crate::profile::{Component, Platform};
