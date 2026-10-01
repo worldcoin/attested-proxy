@@ -226,3 +226,99 @@ fn unix_seconds(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs())
 }
+
+/// A World App stand-in: an attested software key, its issuer, and a fixed clock.
+///
+/// [`TestClient::verifier`] accepts exactly what [`TestClient::request`] signs, so downstream
+/// tests can exercise verification without assembling tokens and keys themselves.
+#[derive(Debug, Clone)]
+pub struct TestClient {
+    /// The Attestation Gateway stand-in.
+    pub issuer: TestIssuer,
+    /// The device key.
+    pub signer: SoftwareSigner,
+    /// The token audience.
+    pub audience: String,
+    /// The authority requests are signed for.
+    pub authority: String,
+    /// The time requests are signed at and the verifier's clock.
+    pub now: SystemTime,
+}
+
+impl TestClient {
+    /// A client for `platform` signing for `authority`.
+    #[must_use]
+    pub fn new(platform: Platform, authority: &str) -> Self {
+        Self {
+            issuer: TestIssuer::new("https://attestation.example"),
+            signer: SoftwareSigner::new(test_key("test device"), platform),
+            audience: "test-audience".to_owned(),
+            authority: authority.to_owned(),
+            now: UNIX_EPOCH + Duration::from_secs(1_790_000_000),
+        }
+    }
+
+    /// A valid integrity token for this client's key.
+    #[must_use]
+    pub fn token(&self) -> String {
+        self.issuer.mint(&TestClaims::valid(
+            &self.audience,
+            self.signer.platform(),
+            self.signer.verifying_key(),
+            self.now,
+        ))
+    }
+
+    /// A verifier builder that accepts this client's requests, with the clock fixed at `now`.
+    ///
+    /// # Panics
+    ///
+    /// Never: the issuer and audience are always set.
+    #[must_use]
+    pub fn verifier(&self) -> crate::verify::VerifierBuilder {
+        let tokens = crate::token::TokenVerifier::new(
+            [(
+                self.issuer.issuer.clone(),
+                std::sync::Arc::new(self.issuer.keys()) as _,
+            )],
+            [self.audience.clone()],
+        )
+        .expect("issuer and audience are set");
+        crate::Verifier::builder(tokens, &self.authority)
+            .clock(std::sync::Arc::new(crate::verify::FixedClock(self.now)))
+    }
+
+    /// The signed headers for a request to `target` (path and optional query).
+    ///
+    /// # Panics
+    ///
+    /// Never: software signing cannot fail.
+    #[must_use]
+    pub fn sign(&self, method: &str, target: &str, body: &[u8]) -> crate::sign::SignedHeaders {
+        let (path, query) = target
+            .split_once('?')
+            .map_or((target, None), |(path, query)| (path, Some(query)));
+        let request =
+            crate::base::CanonicalRequest::new(method, "https", &self.authority, path, query, body)
+                .expect("valid authority");
+        let created = i64::try_from(unix_seconds(self.now)).expect("fits");
+        let nonce = crate::signature::generate_nonce().expect("OS randomness");
+        crate::sign::sign_request_at(&request, &self.token(), created, &nonce, &self.signer)
+            .expect("software signing cannot fail")
+    }
+
+    /// A signed request to `target`, as the server would receive it.
+    ///
+    /// # Panics
+    ///
+    /// Never for a valid method and target.
+    #[must_use]
+    pub fn request(&self, method: &str, target: &str, body: &[u8]) -> http::Request<Vec<u8>> {
+        let signed = self.sign(method, target, body);
+        let mut request = http::Request::builder().method(method).uri(target);
+        for (name, value) in signed.headers() {
+            request = request.header(name, value);
+        }
+        request.body(body.to_vec()).expect("valid request")
+    }
+}
