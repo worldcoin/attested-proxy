@@ -35,7 +35,14 @@
           toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain (_: toolchain);
 
-          src = craneLib.cleanCargoSource ./.;
+          # The shared vectors are read by the tests, so they are part of the source.
+          src = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              (craneLib.fileset.commonCargoSources ./.)
+              ./test-vectors
+            ];
+          };
           commonArgs = {
             inherit src;
             strictDeps = true;
@@ -63,7 +70,11 @@
             fmt = craneLib.cargoFmt { inherit (commonArgs) src pname; };
           };
 
-          devShells.default = craneLib.devShell { };
+          devShells.default = craneLib.devShell {
+            packages = [
+              pkgs.python3 # test-vectors/generate_signature_base.py
+            ];
+          };
         }
       );
     in

@@ -10,5 +10,16 @@ repository.workspace = true
 keywords = ["rfc9421", "http-signatures", "app-attest", "attestation"]
 categories = ["authentication", "cryptography", "web-programming::http-server"]
 
+[dependencies]
+base64.workspace = true
+getrandom.workspace = true
+http.workspace = true
+sfv.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

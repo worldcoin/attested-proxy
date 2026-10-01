@@ -49,6 +49,13 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --locked --workspace --all-features
       - run: cargo test --locked --workspace --no-default-features
+      # The shared vectors are consumed by other implementations, so they must match what the
+      # generators produce from this commit.
+      - name: Test vectors are up to date
+        run: |
+          set -euo pipefail
+          python3 test-vectors/generate_signature_base.py
+          git diff --exit-code -- test-vectors
 
   flake:
     name: flake check
