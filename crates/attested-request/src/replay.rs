@@ -18,23 +18,21 @@ use crate::token::BoxFuture;
 pub trait ReplayGuard: Send + Sync {
     /// Claims `binding` for `ttl`: `Ok(true)` the first time, `Ok(false)` when already claimed.
     ///
-    /// The claim must be atomic across every verifier that shares the store.
+    /// The claim must be atomic across every verifier that shares the store. Unexpired claims
+    /// must not be evicted: if the store cannot retain a new claim, return an error.
+    /// Store errors fail verification closed and are preserved as the rejection source.
     fn claim<'a>(
         &'a self,
         binding: &'a str,
         ttl: Duration,
-    ) -> BoxFuture<'a, Result<bool, ReplayGuardUnavailable>>;
+    ) -> BoxFuture<'a, Result<bool, Box<dyn Error + Send + Sync>>>;
 }
 
-/// The replay store could not be reached. Verification fails closed.
-#[derive(Debug, thiserror::Error)]
-#[error("replay store is unavailable")]
-pub struct ReplayGuardUnavailable(#[source] pub Box<dyn Error + Send + Sync>);
-
-/// A process-local replay guard.
+/// A process-local replay guard for tests and low-traffic, single-replica services.
 ///
 /// Claims are not shared between processes, so this only protects a single replica. Use a shared
-/// store when the service runs more than one.
+/// store when the service runs more than one. Each claim scans the entire map under a mutex
+/// to remove expired entries, so use a shared store with native expiry for production traffic.
 #[derive(Debug, Default)]
 pub struct InMemoryReplayGuard {
     claims: Mutex<HashMap<String, Instant>>,
@@ -45,7 +43,7 @@ impl ReplayGuard for InMemoryReplayGuard {
         &'a self,
         binding: &'a str,
         ttl: Duration,
-    ) -> BoxFuture<'a, Result<bool, ReplayGuardUnavailable>> {
+    ) -> BoxFuture<'a, Result<bool, Box<dyn Error + Send + Sync>>> {
         Box::pin(async move {
             let now = Instant::now();
             let mut claims = self

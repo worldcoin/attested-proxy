@@ -1,6 +1,7 @@
 //! End-to-end verification, covering the same cases as go-sonic's middleware tests.
 
 use std::{
+    error::Error,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -8,11 +9,11 @@ use std::{
 use attested_request::{
     Platform, RejectReason, Verifier,
     base::CanonicalRequest,
-    replay::{InMemoryReplayGuard, ReplayGuard, ReplayGuardUnavailable},
+    replay::{InMemoryReplayGuard, ReplayGuard},
     sign::{SignedHeaders, sign_request_at},
     test_util::{SoftwareSigner, TestClaims, TestIssuer, test_key},
     token::{BoxFuture, IssuerKeys, KeysUnavailable, TokenVerifier},
-    verify::FixedClock,
+    verify::{FixedClock, VerifierConfigError},
 };
 use http::{Request, request::Parts};
 use p256::ecdsa::VerifyingKey;
@@ -524,8 +525,8 @@ impl ReplayGuard for UnavailableGuard {
         &'a self,
         _: &'a str,
         _: Duration,
-    ) -> BoxFuture<'a, Result<bool, ReplayGuardUnavailable>> {
-        Box::pin(async { Err(ReplayGuardUnavailable("timeout".into())) })
+    ) -> BoxFuture<'a, Result<bool, Box<dyn Error + Send + Sync>>> {
+        Box::pin(async { Err("timeout".into()) })
     }
 }
 
@@ -535,10 +536,10 @@ async fn an_unavailable_replay_guard_fails_closed() {
     let verifier =
         harness.verifier_with(|builder| builder.replay_guard(Arc::new(UnavailableGuard)));
     let outgoing = harness.sign("GET", "/v1/matches", b"");
-    assert_eq!(
-        verify(&verifier, outgoing.received()).await,
-        Err(RejectReason::NonceStoreUnavailable)
-    );
+    let (parts, body) = outgoing.received();
+    let rejection = verifier.verify(&parts, &body).await.unwrap_err();
+    assert_eq!(rejection.reason, RejectReason::NonceStoreUnavailable);
+    assert_eq!(rejection.source().unwrap().to_string(), "timeout");
 }
 
 #[tokio::test]
@@ -560,4 +561,110 @@ async fn both_s_forms_of_an_android_signature_verify() {
         let received = with_header(outgoing.received(), "signature", &field);
         assert_eq!(verify(&harness.verifier(), received).await, Ok(()));
     }
+}
+
+/// Reject malformed configuration before any request is processed.
+#[test]
+fn authority_is_validated_when_building() {
+    let harness = Harness::new(Platform::Android);
+    let tokens = TokenVerifier::new(
+        [(
+            harness.issuer.issuer.clone(),
+            Arc::new(harness.issuer.keys()) as _,
+        )],
+        [AUDIENCE.to_owned()],
+    )
+    .unwrap();
+    for authority in ["bad host", "example.com/path", "[::1", "example.com\n"] {
+        assert!(
+            matches!(
+                Verifier::builder(tokens.clone(), authority).build(),
+                Err(VerifierConfigError::InvalidAuthority)
+            ),
+            "{authority:?}"
+        );
+    }
+    for authority in ["", " "] {
+        assert!(matches!(
+            Verifier::builder(tokens.clone(), authority).build(),
+            Err(VerifierConfigError::EmptyAuthority)
+        ));
+    }
+    for authority in ["example.com", "example.com:8443", "[::1]:443"] {
+        assert!(Verifier::builder(tokens.clone(), authority).build().is_ok());
+    }
+}
+
+/// An invalid signature must not prevent the original request from being accepted.
+#[tokio::test]
+async fn invalid_signatures_do_not_consume_replay_claims() {
+    for platform in PLATFORMS {
+        let harness = Harness::new(platform);
+        let verifier = harness.verifier_with(|builder| {
+            builder.replay_guard(Arc::new(InMemoryReplayGuard::default()))
+        });
+        let outgoing = harness.sign("POST", "/v1/config", BODY);
+        assert_eq!(
+            verify(
+                &verifier,
+                outgoing.received_as("POST", "/v1/config", b"altered")
+            )
+            .await,
+            Err(RejectReason::SignatureInvalid)
+        );
+        assert_eq!(verify(&verifier, outgoing.received()).await, Ok(()));
+        assert_eq!(
+            verify(&verifier, outgoing.received()).await,
+            Err(RejectReason::Replayed)
+        );
+    }
+}
+
+/// Simultaneous copies of a signed request must produce exactly one acceptance.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn simultaneous_replays_accept_exactly_once() {
+    let harness = Harness::new(Platform::Android);
+    let verifier =
+        Arc::new(harness.verifier_with(|builder| {
+            builder.replay_guard(Arc::new(InMemoryReplayGuard::default()))
+        }));
+    let outgoing = harness.sign("GET", "/v1/matches", b"");
+    let barrier = Arc::new(tokio::sync::Barrier::new(32));
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..32 {
+        let verifier = verifier.clone();
+        let barrier = barrier.clone();
+        let received = outgoing.received();
+        tasks.spawn(async move {
+            barrier.wait().await;
+            verify(&verifier, received).await
+        });
+    }
+    let mut accepted = 0;
+    while let Some(result) = tasks.join_next().await {
+        match result.unwrap() {
+            Ok(()) => accepted += 1,
+            Err(reason) => assert_eq!(reason, RejectReason::Replayed),
+        }
+    }
+    assert_eq!(accepted, 1);
+}
+
+/// Expired claims can be reclaimed, while the replacement claim remains protected.
+#[tokio::test]
+async fn expired_replay_claims_can_be_reclaimed() {
+    let guard = InMemoryReplayGuard::default();
+    assert!(guard.claim("binding", Duration::ZERO).await.unwrap());
+    assert!(
+        guard
+            .claim("binding", Duration::from_secs(60))
+            .await
+            .unwrap()
+    );
+    assert!(
+        !guard
+            .claim("binding", Duration::from_secs(60))
+            .await
+            .unwrap()
+    );
 }

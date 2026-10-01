@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use http::{HeaderMap, request::Parts};
+use http::{HeaderMap, request::Parts, uri::Authority};
 
 use crate::{
     base::CanonicalRequest,
@@ -81,6 +81,9 @@ pub enum VerifierConfigError {
     /// The authority is empty.
     #[error("authority must be set")]
     EmptyAuthority,
+    /// The authority is not a valid URI authority.
+    #[error("authority must be a valid URI authority")]
+    InvalidAuthority,
     /// The scheme is empty.
     #[error("scheme must be set")]
     EmptyScheme,
@@ -135,6 +138,10 @@ impl VerifierBuilder {
         if verifier.authority.trim().is_empty() {
             return Err(VerifierConfigError::EmptyAuthority);
         }
+        verifier
+            .authority
+            .parse::<Authority>()
+            .map_err(|_| VerifierConfigError::InvalidAuthority)?;
         if verifier.scheme.trim().is_empty() {
             return Err(VerifierConfigError::EmptyScheme);
         }
