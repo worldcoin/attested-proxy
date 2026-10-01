@@ -215,43 +215,45 @@ impl Generator {
     }
 
     fn altered_requests(&mut self) {
-        let signed = self.sign(Platform::Ios, POST);
-        for (name, received) in [
-            (
-                "altered path",
-                Request {
-                    target: "/v1/other?sub=alice",
-                    ..POST
-                },
-            ),
-            (
-                "altered query",
-                Request {
-                    target: "/v1/config?sub=bob",
-                    ..POST
-                },
-            ),
-            (
-                "altered method",
-                Request {
-                    method: "PUT",
-                    ..POST
-                },
-            ),
-            (
-                "altered body",
-                Request {
-                    body: b"{}",
-                    ..POST
-                },
-            ),
-        ] {
-            self.case(
-                name,
-                received,
-                headers(&signed),
-                rejected(RejectReason::SignatureInvalid),
-            );
+        for platform in [Platform::Ios, Platform::Android] {
+            let signed = self.sign(platform, POST);
+            for (name, received) in [
+                (
+                    "altered path",
+                    Request {
+                        target: "/v1/other?sub=alice",
+                        ..POST
+                    },
+                ),
+                (
+                    "altered query",
+                    Request {
+                        target: "/v1/config?sub=bob",
+                        ..POST
+                    },
+                ),
+                (
+                    "altered method",
+                    Request {
+                        method: "PUT",
+                        ..POST
+                    },
+                ),
+                (
+                    "altered body",
+                    Request {
+                        body: b"{}",
+                        ..POST
+                    },
+                ),
+            ] {
+                self.case(
+                    &format!("{platform} {name}"),
+                    received,
+                    headers(&signed),
+                    rejected(RejectReason::SignatureInvalid),
+                );
+            }
         }
 
         let token = self.token(Platform::Ios, |_| {});
@@ -317,6 +319,23 @@ impl Generator {
     }
 
     fn integrity_tokens(&mut self) {
+        let mut wrong_issuer = TestIssuer::new("wrong signing key");
+        wrong_issuer.issuer.clone_from(&self.issuer.issuer);
+        wrong_issuer.kid.clone_from(&self.issuer.kid);
+        let token = wrong_issuer.mint(&TestClaims::valid(
+            AUDIENCE,
+            Platform::Ios,
+            self.ios.verifying_key(),
+            now(),
+        ));
+        let signed = self.sign_with(Platform::Ios, UPGRADE, AUTHORITY, &token, created());
+        self.case(
+            "integrity token signed by the wrong key",
+            UPGRADE,
+            headers(&signed),
+            rejected(RejectReason::IntegrityTokenInvalid),
+        );
+
         let cases: [TokenCase; 4] = [
             (
                 "expired integrity token",
