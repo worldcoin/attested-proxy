@@ -24,7 +24,7 @@ pub struct RemoteJwksConfig {
     pub fetch_timeout: Duration,
     /// How often the background task refreshes the cache.
     pub refresh_interval: Duration,
-    /// Minimum time between two fetches, however many requests ask for one.
+    /// Minimum cooldown after a fetch completes. Explicit refreshes bypass it.
     pub min_refresh_interval: Duration,
     /// How old the cache may grow while the issuer is unreachable before verification fails.
     pub max_staleness: Duration,
@@ -44,12 +44,12 @@ impl Default for RemoteJwksConfig {
     }
 }
 
-/// Why a JWKS fetch failed.
-#[derive(Debug, thiserror::Error)]
+/// Why a JWKS fetch failed. Causes are shared between callers awaiting the same fetch.
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum JwksFetchError {
     /// The request failed or timed out.
     #[error("JWKS request failed")]
-    Request(#[from] reqwest::Error),
+    Request(#[from] Arc<reqwest::Error>),
     /// The issuer answered with a non-success status.
     #[error("JWKS endpoint answered {0}")]
     Status(reqwest::StatusCode),
@@ -58,10 +58,13 @@ pub enum JwksFetchError {
     TooLarge,
     /// The document is not a JWKS.
     #[error(transparent)]
-    Invalid(#[from] JwksError),
+    Invalid(#[from] Arc<JwksError>),
     /// The document has no usable ES256 key. The cache keeps its previous keys.
     #[error("JWKS document has no usable key")]
     Empty,
+    /// The shared fetch task panicked or was stopped by the runtime.
+    #[error("JWKS fetch task failed")]
+    Task(#[from] Arc<tokio::task::JoinError>),
 }
 
 /// A remote JWKS with a local cache. Cheap to clone; clones share the cache.
@@ -75,8 +78,8 @@ struct Inner {
     client: reqwest::Client,
     config: RemoteJwksConfig,
     cache: ArcSwapOption<Snapshot>,
-    // Held for the duration of a fetch, so concurrent callers share one fetch.
-    last_attempt: Mutex<Option<Instant>>,
+    /// Owned by the fetch task so cancelling a caller cannot cancel the shared refresh.
+    last_attempt: Arc<Mutex<Option<RefreshAttempt>>>,
 }
 
 struct Snapshot {
@@ -84,9 +87,12 @@ struct Snapshot {
     fetched_at: Instant,
 }
 
-enum Refresh {
-    Fetched,
-    Skipped,
+/// The last completed refresh, including failures shared with waiting callers.
+struct RefreshAttempt {
+    /// Identifies a refresh completed after a caller began waiting.
+    finished_at: Instant,
+    /// Cloning preserves the original failure without requiring cloneable HTTP errors.
+    result: Result<(), JwksFetchError>,
 }
 
 enum Cached {
@@ -105,20 +111,18 @@ impl RemoteJwks {
                 client,
                 config,
                 cache: ArcSwapOption::empty(),
-                last_attempt: Mutex::new(None),
+                last_attempt: Arc::new(Mutex::new(None)),
             }),
         }
     }
 
-    /// Fetches the JWKS now, replacing the cache on success.
+    /// Fetches the JWKS now, or joins an ongoing fetch, replacing the cache on success.
     ///
     /// # Errors
     ///
     /// Returns a [`JwksFetchError`] when the fetch fails; the cache is left as it was.
     pub async fn refresh(&self) -> Result<(), JwksFetchError> {
-        let mut last_attempt = self.inner.last_attempt.lock().await;
-        *last_attempt = Some(Instant::now());
-        self.fetch().await
+        self.refresh_shared(Duration::ZERO).await
     }
 
     /// How old the cached keys are, or `None` before the first successful fetch.
@@ -159,16 +163,30 @@ impl RemoteJwks {
         })
     }
 
-    async fn refresh_if_due(&self) -> Result<Refresh, JwksFetchError> {
-        let mut last_attempt = self.inner.last_attempt.lock().await;
-        let min_interval = self.inner.config.min_refresh_interval;
-        if last_attempt.is_some_and(|attempt| attempt.elapsed() < min_interval) {
-            return Ok(Refresh::Skipped);
+    /// Reuses a refresh completed while waiting, or starts one that outlives its caller.
+    async fn refresh_shared(&self, cooldown: Duration) -> Result<(), JwksFetchError> {
+        let started = Instant::now();
+        let mut last_attempt = self.inner.last_attempt.clone().lock_owned().await;
+        if let Some(attempt) = last_attempt.as_ref()
+            && (attempt.finished_at >= started || attempt.finished_at.elapsed() < cooldown)
+        {
+            return attempt.result.clone();
         }
-        *last_attempt = Some(Instant::now());
-        self.fetch().await.map(|()| Refresh::Fetched)
+
+        let jwks = self.clone();
+        tokio::spawn(async move {
+            let result = jwks.fetch().await;
+            *last_attempt = Some(RefreshAttempt {
+                finished_at: Instant::now(),
+                result: result.clone(),
+            });
+            result
+        })
+        .await
+        .map_err(Arc::new)?
     }
 
+    /// Fetches a bounded document and publishes usable keys atomically.
     async fn fetch(&self) -> Result<(), JwksFetchError> {
         let config = &self.inner.config;
         let mut response = self
@@ -177,18 +195,19 @@ impl RemoteJwks {
             .get(&self.inner.url)
             .timeout(config.fetch_timeout)
             .send()
-            .await?;
+            .await
+            .map_err(Arc::new)?;
         if !response.status().is_success() {
             return Err(JwksFetchError::Status(response.status()));
         }
         let mut document = Vec::new();
-        while let Some(chunk) = response.chunk().await? {
+        while let Some(chunk) = response.chunk().await.map_err(Arc::new)? {
             if document.len() + chunk.len() > config.max_document_bytes {
                 return Err(JwksFetchError::TooLarge);
             }
             document.extend_from_slice(&chunk);
         }
-        let keys = parse_jwks(&document)?;
+        let keys = parse_jwks(&document).map_err(Arc::new)?;
         if keys.is_empty() {
             return Err(JwksFetchError::Empty);
         }
@@ -223,10 +242,9 @@ impl IssuerKeys for RemoteJwks {
                 return Ok(Some(key));
             }
             // Unknown kid or stale cache: the issuer may have rotated keys.
-            match self.refresh_if_due().await {
-                Ok(Refresh::Fetched | Refresh::Skipped) => {}
-                Err(error) => return Err(KeysUnavailable(Box::new(error))),
-            }
+            self.refresh_shared(self.inner.config.min_refresh_interval)
+                .await
+                .map_err(|error| KeysUnavailable(Box::new(error)))?;
             match self.cached(kid) {
                 Cached::Key(key) => Ok(Some(key)),
                 Cached::UnknownKid => Ok(None),

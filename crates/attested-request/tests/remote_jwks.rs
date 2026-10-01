@@ -226,3 +226,76 @@ async fn a_slow_issuer_times_out() {
         matches!(jwks.refresh().await, Err(JwksFetchError::Request(error)) if error.is_timeout())
     );
 }
+
+/// Waiting lookups reuse a slow refresh, including its failure or unknown-key result.
+#[tokio::test]
+async fn concurrent_lookups_share_slow_refreshes() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    for status in [200, 503] {
+        let server = MockServer::start().await;
+        serve(
+            &server,
+            ResponseTemplate::new(status)
+                .set_body_json(issuer.jwks())
+                .set_delay(Duration::from_millis(100)),
+        )
+        .await;
+        let jwks = jwks_at(
+            &server,
+            RemoteJwksConfig {
+                min_refresh_interval: Duration::from_millis(20),
+                ..config()
+            },
+        );
+        let (first, second, unknown) = tokio::join!(
+            jwks.key(&issuer.kid),
+            jwks.key(&issuer.kid),
+            jwks.key("unknown"),
+        );
+        if status == 200 {
+            assert!(first.unwrap().is_some());
+            assert!(second.unwrap().is_some());
+            assert!(unknown.unwrap().is_none());
+        } else {
+            for result in [first, second, unknown] {
+                let error = result.unwrap_err();
+                assert!(matches!(
+                    error.0.downcast_ref::<JwksFetchError>(),
+                    Some(JwksFetchError::Status(status)) if *status == 503
+                ));
+            }
+        }
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+}
+
+/// Cancelling the initiating lookup must not cancel the shared fetch or strand its waiters.
+#[tokio::test]
+async fn a_refresh_survives_cancellation_of_its_caller() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        ResponseTemplate::new(200)
+            .set_body_json(issuer.jwks())
+            .set_delay(Duration::from_millis(100)),
+    )
+    .await;
+    let jwks = jwks_at(&server, config());
+    let caller_jwks = jwks.clone();
+    let kid = issuer.kid.clone();
+    let caller = tokio::spawn(async move { caller_jwks.key(&kid).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while server.received_requests().await.unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert!(jwks.is_usable());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
