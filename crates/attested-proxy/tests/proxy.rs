@@ -76,7 +76,8 @@ async fn start_upstream(upstream: Upstream) -> SocketAddr {
         .route("/v1/matches", get(matches))
         .route(
             "/v1/slow",
-            get(|| async {
+            get(|State(upstream): State<Upstream>| async move {
+                upstream.hits.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 "late"
             }),
@@ -365,6 +366,184 @@ async fn shutdown_lets_open_tunnels_finish() {
     tokio::time::timeout(Duration::from_secs(3), proxy.served)
         .await
         .expect("serve returns once the tunnel closes")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn initial_header_timeout_releases_the_connection_slot() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let client = TestClient::new(Platform::Ios, AUTHORITY);
+    let upstream = start_upstream(Upstream::default()).await;
+    let proxy = start_proxy(
+        &client,
+        ProxySettings {
+            max_connections: 1,
+            header_read_timeout: Duration::from_millis(50),
+            ..settings(upstream)
+        },
+    )
+    .await;
+
+    // Both silence and a partial HTTP/2 preface used to stall protocol detection forever.
+    for prefix in [b"".as_slice(), b"PRI * HTTP/2.0\r\n"] {
+        let mut idle = tokio::net::TcpStream::connect(proxy.addr).await.unwrap();
+        idle.write_all(prefix).await.unwrap();
+        let read = tokio::time::timeout(Duration::from_secs(2), idle.read(&mut [0]))
+            .await
+            .expect("initial header deadline closes the socket");
+        assert!(
+            matches!(read, Ok(0)) || read.is_err(),
+            "unexpected response: {read:?}"
+        );
+        let response = reqwest::Client::new()
+            .get(format!("http://{}/health", proxy.addr))
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    proxy.stop.send(()).unwrap();
+    proxy.served.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn shutdown_grace_closes_open_tunnels() {
+    let client = TestClient::new(Platform::Ios, AUTHORITY);
+    let upstream = start_upstream(Upstream::default()).await;
+    let proxy = start_proxy(
+        &client,
+        ProxySettings {
+            shutdown_grace: Duration::from_millis(50),
+            ..settings(upstream)
+        },
+    )
+    .await;
+    let (mut socket, _) =
+        tokio_tungstenite::connect_async(websocket_request(&client, &proxy, true))
+            .await
+            .unwrap();
+    proxy.stop.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), proxy.served)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(1), socket.next())
+        .await
+        .expect("tunnel is closed before serve returns");
+    assert!(
+        matches!(
+            reply,
+            None | Some(Err(_) | Ok(tungstenite::Message::Close(_)))
+        ),
+        "unexpected reply: {reply:?}"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_grace_closes_in_flight_requests() {
+    let client = TestClient::new(Platform::Ios, AUTHORITY);
+    let upstream = Upstream::default();
+    let upstream_addr = start_upstream(upstream.clone()).await;
+    let proxy = start_proxy(
+        &client,
+        ProxySettings {
+            shutdown_grace: Duration::from_millis(50),
+            upstream_response_timeout: Duration::from_secs(5),
+            ..settings(upstream_addr)
+        },
+    )
+    .await;
+    let request =
+        tokio::spawn(send_signed(&client, &proxy, reqwest::Method::GET, "/v1/slow", "").send());
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while upstream.hits.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("request reached upstream");
+    proxy.stop.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), proxy.served)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), request)
+            .await
+            .expect("request connection is closed before serve returns")
+            .unwrap()
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn http2_requests_work_and_close_at_shutdown_deadline() {
+    use bytes::Bytes;
+    use http_body_util::{BodyExt as _, Empty};
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+
+    let client = TestClient::new(Platform::Ios, AUTHORITY);
+    let upstream = Upstream::default();
+    let upstream_addr = start_upstream(upstream.clone()).await;
+    let proxy = start_proxy(
+        &client,
+        ProxySettings {
+            shutdown_grace: Duration::from_millis(50),
+            upstream_response_timeout: Duration::from_secs(5),
+            unprotected_paths: vec!["/health".into(), "/v1/slow".into()],
+            ..settings(upstream_addr)
+        },
+    )
+    .await;
+    let stream = tokio::net::TcpStream::connect(proxy.addr).await.unwrap();
+    let (mut sender, connection) = hyper::client::conn::http2::handshake::<_, _, Empty<Bytes>>(
+        TokioExecutor::new(),
+        TokioIo::new(stream),
+    )
+    .await
+    .unwrap();
+    let connection = tokio::spawn(connection);
+    let request = |path| {
+        http::Request::builder()
+            .uri(format!("http://{}{path}", proxy.addr))
+            .body(Empty::new())
+            .unwrap()
+    };
+    let response = sender.send_request(request("/health")).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.into_body().collect().await.unwrap().to_bytes(),
+        "upstream healthy"
+    );
+    let pending = tokio::spawn(sender.send_request(request("/v1/slow")));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while upstream.hits.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    proxy.stop.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), proxy.served)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
+    drop(sender);
+    let _ = tokio::time::timeout(Duration::from_secs(1), connection)
+        .await
         .unwrap()
         .unwrap();
 }

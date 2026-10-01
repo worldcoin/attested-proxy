@@ -14,7 +14,7 @@ use hyper_util::{
     server::{conn::auto, graceful::GracefulShutdown},
 };
 use tokio::{net::TcpListener, sync::Semaphore};
-use tokio_util::task::TaskTracker;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tower::{Layer as _, ServiceExt as _};
 
 use crate::{
@@ -29,6 +29,7 @@ pub struct Proxy {
     settings: Arc<ProxySettings>,
     capacity: Arc<Semaphore>,
     tunnels: TaskTracker,
+    force_shutdown: CancellationToken,
 }
 
 #[derive(Clone)]
@@ -60,11 +61,13 @@ impl Proxy {
     pub fn new(verifier: Arc<Verifier>, settings: ProxySettings) -> Self {
         let capacity = Arc::new(Semaphore::new(settings.max_connections));
         let tunnels = TaskTracker::new();
+        let force_shutdown = CancellationToken::new();
         let forward = Forward::new(
             settings.upstream.clone(),
             settings.upstream_connect_timeout,
             settings.upstream_response_timeout,
             tunnels.clone(),
+            force_shutdown.clone(),
         );
         let protected = AttestedRequestLayer::new(verifier)
             .body_limits(settings.body_limits)
@@ -78,6 +81,7 @@ impl Proxy {
             settings: Arc::new(settings),
             capacity,
             tunnels,
+            force_shutdown,
         }
     }
 
@@ -97,6 +101,7 @@ impl Proxy {
         shutdown: impl Future<Output = ()>,
     ) -> io::Result<()> {
         let graceful = GracefulShutdown::new();
+        let connections = TaskTracker::new();
         let mut builder = auto::Builder::new(TokioExecutor::new());
         builder
             .http1()
@@ -121,7 +126,10 @@ impl Proxy {
             };
             let slot = ConnectionSlot(Arc::new(std::sync::Mutex::new(Some(slot))));
             let router = self.router.clone();
+            let headers_received = CancellationToken::new();
+            let first_request = headers_received.clone();
             let service = hyper::service::service_fn(move |mut request: Request<Incoming>| {
+                first_request.cancel();
                 request.extensions_mut().insert(slot.clone());
                 let router = router.clone();
                 async move { Ok::<_, Infallible>(router.route(request).await) }
@@ -131,24 +139,34 @@ impl Proxy {
                 .into_owned();
             let connection = graceful.watch(connection);
             let active = active.clone();
-            tokio::spawn(async move {
+            let force_shutdown = self.force_shutdown.clone();
+            let header_timeout = self.settings.header_read_timeout;
+            connections.spawn(async move {
                 active.increment(1);
                 // Errors here are clients misbehaving or going away; hyper already answered.
-                let _ = connection.await;
+                let _ = force_shutdown
+                    .run_until_cancelled(with_initial_header_timeout(
+                        connection,
+                        headers_received,
+                        header_timeout,
+                    ))
+                    .await;
                 active.decrement(1);
             });
         }
 
         drop(listener);
-        self.drain(graceful).await;
+        self.drain(graceful, connections).await;
         Ok(())
     }
 
-    async fn drain(&self, graceful: GracefulShutdown) {
+    async fn drain(&self, graceful: GracefulShutdown, connections: TaskTracker) {
         let grace = self.settings.shutdown_grace;
+        connections.close();
         self.tunnels.close();
         let drained = tokio::time::timeout(grace, async {
             graceful.shutdown().await;
+            connections.wait().await;
             self.tunnels.wait().await;
         })
         .await;
@@ -158,6 +176,26 @@ impl Proxy {
                 tunnels = self.tunnels.len(),
                 "shutdown grace elapsed; closing remaining connections",
             );
+            self.force_shutdown.cancel();
+            connections.wait().await;
+            self.tunnels.wait().await;
+        }
+    }
+}
+
+/// Bounds protocol detection and the first request's headers, before Hyper's HTTP/1 timer applies.
+async fn with_initial_header_timeout<T>(
+    connection: impl Future<Output = T>,
+    headers_received: CancellationToken,
+    timeout: Duration,
+) -> Option<T> {
+    tokio::pin!(connection);
+    tokio::select! {
+        result = &mut connection => Some(result),
+        () = headers_received.cancelled() => Some(connection.await),
+        () = tokio::time::sleep(timeout) => {
+            metrics::counter!("attested_proxy.connections.header_timeout").increment(1);
+            None
         }
     }
 }
@@ -190,7 +228,10 @@ pub async fn serve_admin(
             () = &mut shutdown => return Ok(()),
         };
         let ready = Arc::clone(&ready);
+        let headers_received = CancellationToken::new();
+        let first_request = headers_received.clone();
         let service = hyper::service::service_fn(move |request: Request<Incoming>| {
+            first_request.cancel();
             let status = match request.uri().path() {
                 "/health" => StatusCode::OK,
                 "/ready" if ready() => StatusCode::OK,
@@ -207,9 +248,12 @@ pub async fn serve_admin(
                 .http1()
                 .timer(TokioTimer::new())
                 .header_read_timeout(Duration::from_secs(5));
-            let _ = builder
-                .serve_connection(TokioIo::new(stream), service)
-                .await;
+            let _ = with_initial_header_timeout(
+                builder.serve_connection(TokioIo::new(stream), service),
+                headers_received,
+                Duration::from_secs(5),
+            )
+            .await;
         });
     }
 }

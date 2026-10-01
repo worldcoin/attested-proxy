@@ -27,7 +27,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
 };
 use tokio::sync::OwnedSemaphorePermit;
-use tokio_util::task::TaskTracker;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 /// The body type of every response the proxy writes.
 pub(crate) type ProxyBody = UnsyncBoxBody<Bytes, Box<dyn StdError + Send + Sync>>;
@@ -92,6 +92,7 @@ struct Inner {
     upstream: Uri,
     response_timeout: Duration,
     tunnels: TaskTracker,
+    force_shutdown: CancellationToken,
 }
 
 impl Forward {
@@ -100,6 +101,7 @@ impl Forward {
         connect_timeout: Duration,
         response_timeout: Duration,
         tunnels: TaskTracker,
+        force_shutdown: CancellationToken,
     ) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_connect_timeout(Some(connect_timeout));
@@ -111,6 +113,7 @@ impl Forward {
                 upstream,
                 response_timeout,
                 tunnels,
+                force_shutdown,
             }),
         }
     }
@@ -127,6 +130,8 @@ impl Forward {
 
         let (mut head, body) = request.into_parts();
         prepare_headers(&mut head.headers, &head.extensions, upgrade.as_ref());
+        // The cleartext upstream client uses HTTP/1, regardless of the inbound protocol.
+        head.version = http::Version::HTTP_11;
         head.uri = upstream_uri(&inner.upstream, head.uri.path_and_query());
         let upstream_request = Request::from_parts(head, body.map_err(Into::into).boxed_unsync());
 
@@ -156,9 +161,10 @@ impl Forward {
         {
             let upstream_upgrade = hyper::upgrade::on(&mut response);
             let slot = slot.as_ref().and_then(ConnectionSlot::take);
+            let force_shutdown = inner.force_shutdown.clone();
             inner.tunnels.spawn(async move {
                 let _slot = slot;
-                tunnel(client_upgrade, upstream_upgrade).await;
+                tunnel(client_upgrade, upstream_upgrade, force_shutdown).await;
             });
             return response.map(|_| empty());
         }
@@ -188,8 +194,18 @@ where
 }
 
 /// Copies bytes both ways until either side closes.
-async fn tunnel(client: hyper::upgrade::OnUpgrade, upstream: hyper::upgrade::OnUpgrade) {
-    let (client, upstream) = match tokio::try_join!(client, upstream) {
+async fn tunnel(
+    client: hyper::upgrade::OnUpgrade,
+    upstream: hyper::upgrade::OnUpgrade,
+    force_shutdown: CancellationToken,
+) {
+    let Some(upgraded) = force_shutdown
+        .run_until_cancelled(async { tokio::try_join!(client, upstream) })
+        .await
+    else {
+        return;
+    };
+    let (client, upstream) = match upgraded {
         Ok(upgraded) => upgraded,
         Err(error) => {
             tracing::warn!(error = %error, "websocket upgrade failed");
@@ -201,8 +217,12 @@ async fn tunnel(client: hyper::upgrade::OnUpgrade, upstream: hyper::upgrade::OnU
     let active = metrics::gauge!("attested_proxy.tunnels.active");
     active.increment(1);
     // A peer resetting a socket is how tunnels routinely end, so it is not an error here.
-    let _ =
-        tokio::io::copy_bidirectional(&mut TokioIo::new(client), &mut TokioIo::new(upstream)).await;
+    let _ = force_shutdown
+        .run_until_cancelled(tokio::io::copy_bidirectional(
+            &mut TokioIo::new(client),
+            &mut TokioIo::new(upstream),
+        ))
+        .await;
     active.decrement(1);
 }
 
