@@ -65,6 +65,8 @@
               // {
                 inherit cargoArtifacts;
                 cargoTestExtraArgs = "--workspace --all-features";
+                # The tests talk to mock servers on loopback.
+                __darwinAllowLocalNetworking = true;
               }
             );
             fmt = craneLib.cargoFmt { inherit (commonArgs) src pname; };

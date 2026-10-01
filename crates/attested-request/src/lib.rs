@@ -17,6 +17,8 @@ pub mod base;
 pub mod device;
 pub mod profile;
 pub mod reject;
+#[cfg(feature = "remote-jwks")]
+pub mod remote_jwks;
 pub mod replay;
 pub mod sign;
 pub mod signature;
