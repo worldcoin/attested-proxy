@@ -12,8 +12,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier as _};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use p256::ecdsa::VerifyingKey;
 use serde::Deserialize;
 
 use crate::{
@@ -176,8 +176,12 @@ pub struct AttestedDevice {
 /// Verifies integrity tokens against trusted issuers and accepted audiences.
 #[derive(Clone)]
 pub struct TokenVerifier {
+    /// Trusted issuer key providers.
     issuers: HashMap<String, Arc<dyn IssuerKeys>>,
+    /// Preference order when a token names multiple accepted audiences.
     audiences: Vec<String>,
+    /// Fixed JWT algorithm and audience policy.
+    validation: Validation,
 }
 
 /// A [`TokenVerifier`] could not be built from its configuration.
@@ -191,13 +195,7 @@ pub enum TokenVerifierConfigError {
     NoAudience,
 }
 
-#[derive(Deserialize)]
-struct Header {
-    alg: String,
-    kid: Option<String>,
-    crit: Option<serde_json::Value>,
-}
-
+/// JWT permits one audience or a list of audiences.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Audience {
@@ -205,18 +203,32 @@ enum Audience {
     Many(Vec<String>),
 }
 
+/// Integrity-token claims; Serde preserves the standard JWT wire names.
 #[derive(Deserialize)]
 struct Claims {
-    iss: String,
-    aud: Audience,
-    exp: Option<u64>,
-    nbf: Option<u64>,
-    // Optional so that a missing verdict stays distinct from a failed one.
-    pass: Option<bool>,
+    /// Identifies the configured signing-key provider.
+    #[serde(rename = "iss")]
+    issuer: String,
+    /// Intended recipients, as a string or list.
+    #[serde(rename = "aud")]
+    audience: Audience,
+    /// Exclusive expiry, in Unix seconds.
+    #[serde(rename = "exp")]
+    expires_at: u64,
+    /// Inclusive validity start, in Unix seconds.
+    #[serde(rename = "nbf")]
+    not_before: Option<u64>,
+    /// Optional to distinguish an absent verdict from a failed one.
+    #[serde(rename = "pass")]
+    attestation_passed: Option<bool>,
+    /// Parsed separately to report unsupported platforms explicitly.
     platform: String,
-    cnf: Confirmation,
+    /// Binds the attestation to the device's key.
+    #[serde(rename = "cnf")]
+    confirmation: Confirmation,
 }
 
+/// The device key bound to the attestation.
 #[derive(Deserialize)]
 struct Confirmation {
     jwk: EcJwk,
@@ -245,36 +257,32 @@ impl TokenVerifier {
         if audiences.is_empty() {
             return Err(TokenVerifierConfigError::NoAudience);
         }
-        Ok(Self { issuers, audiences })
+
+        let mut validation = Validation::new(Algorithm::ES256);
+        validation.set_audience(&audiences);
+        // Time is checked against the caller's clock in verify, with no expiry leeway.
+        validation.validate_exp = false;
+        validation.validate_nbf = false;
+
+        Ok(Self {
+            issuers,
+            audiences,
+            validation,
+        })
     }
 
     /// Verifies `token` at `now` and returns the device it attests.
     ///
-    /// Only `iss` and `kid` are read before the signature is checked, to select the key.
+    /// Unverified claims are used only to select a trusted issuer and its signing key.
     ///
     /// # Errors
     ///
     /// Returns a [`TokenError`] describing why the token was refused.
     pub async fn verify(&self, token: &str, now: SystemTime) -> Result<AttestedDevice, TokenError> {
-        let mut segments = token.split('.');
-        let (Some(header), Some(payload), Some(signature), None) = (
-            segments.next(),
-            segments.next(),
-            segments.next(),
-            segments.next(),
-        ) else {
-            return Err(TokenError::Malformed);
-        };
-        let header: Header = decode_json(header)?;
-        let claims: Claims = decode_json(payload)?;
-        let signature = URL_SAFE_NO_PAD
-            .decode(signature)
-            .map_err(|_| TokenError::Malformed)?;
-
-        if header.alg != TOKEN_ALG {
+        let header = decode_header(token).map_err(token_error)?;
+        if header.alg != Algorithm::ES256 {
             return Err(TokenError::UnsupportedAlgorithm);
         }
-        // No critical header extension is understood, so any is a reason to refuse.
         if header.crit.is_some() {
             return Err(TokenError::Malformed);
         }
@@ -282,49 +290,53 @@ impl TokenVerifier {
             .kid
             .filter(|kid| !kid.is_empty())
             .ok_or(TokenError::Malformed)?;
+
+        // Unverified claims only select a configured issuer; no token URL is ever fetched.
+        let unverified: Claims =
+            jsonwebtoken::dangerous::insecure_decode_claims(token).map_err(token_error)?;
         let keys = self
             .issuers
-            .get(&claims.iss)
+            .get(&unverified.issuer)
             .ok_or(TokenError::UntrustedIssuer)?;
         let issuer_key = keys.key(&kid).await?.ok_or(TokenError::UnknownKey)?;
-
-        let signature = Signature::from_slice(&signature).map_err(|_| TokenError::BadSignature)?;
-        let signing_input = &token[..header_and_payload_len(token)];
-        issuer_key
-            .verify(signing_input.as_bytes(), &signature)
-            .map_err(|_| TokenError::BadSignature)?;
+        let key = DecodingKey::from_ec_der(issuer_key.to_encoded_point(false).as_bytes());
+        let claims = decode::<Claims>(token, &key, &self.validation)
+            .map_err(token_error)?
+            .claims;
 
         let now_secs = now
             .duration_since(UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());
-        let exp = claims.exp.ok_or(TokenError::Malformed)?;
-        if now_secs >= exp {
+        if now_secs >= claims.expires_at {
             return Err(TokenError::Expired);
         }
-        if claims.nbf.is_some_and(|nbf| now_secs < nbf) {
+        if claims.not_before.is_some_and(|start| now_secs < start) {
             return Err(TokenError::NotYetValid);
         }
         let audience = self
-            .accepted_audience(&claims.aud)
+            .accepted_audience(&claims.audience)
             .ok_or(TokenError::WrongAudience)?;
-        match claims.pass {
+        match claims.attestation_passed {
             None => return Err(TokenError::MissingPass),
             Some(false) => return Err(TokenError::IntegrityFailed),
             Some(true) => {}
         }
         let platform =
             Platform::from_claim(&claims.platform).ok_or(TokenError::UnsupportedPlatform)?;
-        let key = DeviceKey::new(claims.cnf.jwk.to_verifying_key()?);
+        let key = DeviceKey::new(claims.confirmation.jwk.to_verifying_key()?);
 
         Ok(AttestedDevice {
             key,
             platform,
-            issuer: claims.iss,
+            issuer: claims.issuer,
             audience: audience.to_owned(),
-            expires_at: UNIX_EPOCH + Duration::from_secs(exp),
+            expires_at: UNIX_EPOCH
+                .checked_add(Duration::from_secs(claims.expires_at))
+                .ok_or(TokenError::Malformed)?,
         })
     }
 
+    /// Selects the first configured audience present in the verified token.
     fn accepted_audience(&self, audience: &Audience) -> Option<&str> {
         let offered: &[String] = match audience {
             Audience::One(audience) => std::slice::from_ref(audience),
@@ -337,14 +349,16 @@ impl TokenVerifier {
     }
 }
 
-fn decode_json<T: for<'de> Deserialize<'de>>(segment: &str) -> Result<T, TokenError> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(segment)
-        .map_err(|_| TokenError::Malformed)?;
-    serde_json::from_slice(&bytes).map_err(|_| TokenError::Malformed)
-}
-
-// The JWS signing input is everything before the second dot.
-fn header_and_payload_len(token: &str) -> usize {
-    token.rfind('.').unwrap_or(token.len())
+/// Maps JWT failures to the profile's rejection taxonomy.
+fn token_error(error: jsonwebtoken::errors::Error) -> TokenError {
+    use jsonwebtoken::errors::ErrorKind;
+    match error.into_kind() {
+        ErrorKind::InvalidSignature => TokenError::BadSignature,
+        ErrorKind::InvalidAlgorithm
+        | ErrorKind::InvalidAlgorithmName
+        | ErrorKind::UnsupportedAlgorithm => TokenError::UnsupportedAlgorithm,
+        ErrorKind::InvalidIssuer => TokenError::UntrustedIssuer,
+        ErrorKind::InvalidAudience => TokenError::WrongAudience,
+        _ => TokenError::Malformed,
+    }
 }

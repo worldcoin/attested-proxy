@@ -135,7 +135,7 @@ async fn header_and_signature_failures() {
                 b64(&json!({"alg": "none", "kid": issuer.kid})),
                 b64(&payload)
             ),
-            |e| matches!(e, TokenError::UnsupportedAlgorithm),
+            |e| matches!(e, TokenError::Malformed),
         ),
         (
             "alg HS256",
@@ -281,4 +281,56 @@ fn a_verifier_needs_an_issuer_and_an_audience() {
 
 fn b64(value: &Value) -> String {
     URL_SAFE_NO_PAD.encode(value.to_string())
+}
+
+/// JWT migration preserves the injected clock, exact bounds, and required expiry.
+#[tokio::test]
+async fn token_time_boundaries() {
+    let issuer = issuer();
+    let verifier = verifier(&issuer);
+    let header = json!({"alg": "ES256", "kid": issuer.kid});
+    let original = payload(&claims(), &issuer);
+    for (exp, nbf, expected) in [
+        (Some(1_790_000_001), Some(1_790_000_000), "ok"),
+        (Some(1_790_000_000), None, "expired"),
+        (Some(1_790_000_001), Some(1_790_000_001), "future"),
+        (None, None, "malformed"),
+        (Some(u64::MAX), None, "malformed"),
+    ] {
+        let mut payload = original.clone();
+        match exp {
+            Some(exp) => payload["exp"] = json!(exp),
+            None => {
+                payload.as_object_mut().unwrap().remove("exp");
+            }
+        }
+        if let Some(nbf) = nbf {
+            payload["nbf"] = json!(nbf);
+        }
+        let result = verifier
+            .verify(&issuer.sign_jws(&header, &payload), now())
+            .await;
+        match expected {
+            "ok" => {
+                result.unwrap();
+            }
+            "expired" => assert!(matches!(result, Err(TokenError::Expired))),
+            "future" => assert!(matches!(result, Err(TokenError::NotYetValid))),
+            _ => assert!(matches!(result, Err(TokenError::Malformed))),
+        }
+    }
+}
+
+/// A token cannot substitute its own signing key for the configured issuer's key.
+#[tokio::test]
+async fn token_supplied_key_is_not_trusted() {
+    let issuer = issuer();
+    let attacker = TestIssuer::new("attacker");
+    let payload = payload(&claims(), &issuer);
+    let header = json!({"alg": "ES256", "kid": issuer.kid, "jwk": attacker.jwks()["keys"][0]});
+    let token = attacker.sign_jws(&header, &payload);
+    assert!(matches!(
+        verifier(&issuer).verify(&token, now()).await,
+        Err(TokenError::BadSignature)
+    ));
 }
