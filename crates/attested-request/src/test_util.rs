@@ -299,7 +299,8 @@ impl TestClient {
             .split_once('?')
             .map_or((target, None), |(path, query)| (path, Some(query)));
         let request =
-            crate::base::CanonicalRequest::new(method, "https", &self.authority, path, query, body);
+            crate::base::CanonicalRequest::new(method, "https", &self.authority, path, query, body)
+                .expect("valid authority");
         let created = i64::try_from(unix_seconds(self.now)).expect("fits");
         let nonce = crate::signature::generate_nonce().expect("OS randomness");
         crate::sign::sign_request_at(&request, &self.token(), created, &nonce, &self.signer)

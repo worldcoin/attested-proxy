@@ -221,6 +221,11 @@ impl Verifier {
             &self.authority,
             body,
         )
+        .map_err(|error| {
+            Rejection::new(RejectReason::SignatureBaseIncomplete)
+                .with_platform(platform)
+                .with_source(error)
+        })?
         .signature_base(&params, headers.integrity_token);
         device
             .key

@@ -130,7 +130,7 @@ impl Harness {
         let (path, query) = target
             .split_once('?')
             .map_or((target, None), |(path, query)| (path, Some(query)));
-        let request = CanonicalRequest::new(method, "https", authority, path, query, body);
+        let request = CanonicalRequest::new(method, "https", authority, path, query, body).unwrap();
         let headers = sign_request_at(&request, token, created, nonce, &self.signer).unwrap();
         Outgoing {
             method,
