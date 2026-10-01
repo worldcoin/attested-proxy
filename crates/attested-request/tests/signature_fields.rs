@@ -58,6 +58,30 @@ fn signer_output_is_the_canonical_serialization() {
 }
 
 #[test]
+/// Construction rejects values that cannot round-trip through the parser.
+fn constructor_rejects_invalid_parameters() {
+    for (created, nonce, alg, param) in [
+        (0, "n", "a", Param::Created),
+        (-1, "n", "a", Param::Created),
+        (1_000_000_000_000_000, "n", "a", Param::Created),
+        (1, "", "a", Param::Nonce),
+        (1, "n", "", Param::Alg),
+        (1, "\n", "a", Param::Nonce),
+        (1, "n", "\n", Param::Alg),
+    ] {
+        assert_eq!(
+            SignatureParams::new(created, nonce, alg),
+            Err(SignatureInputError::InvalidParameter(param)),
+        );
+    }
+
+    for created in [1, 999_999_999_999_999] {
+        let params = SignatureParams::new(created, "n", "a").unwrap();
+        assert_eq!(SignatureParams::parse(&params.to_field()).unwrap(), params);
+    }
+}
+
+#[test]
 fn equivalent_whitespace_produces_the_same_base() {
     // Structured Fields allows these spellings; RFC 9421 §3.2 serializes the parsed value.
     let variants = [
