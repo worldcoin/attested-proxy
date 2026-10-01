@@ -2,7 +2,7 @@
 
 use std::{error::Error as StdError, io, time::Duration};
 
-use attested_request::RejectReason;
+use attested_request::{RejectReason, Rejection};
 use bytes::Bytes;
 use http_body::Body;
 use http_body_util::{BodyExt as _, LengthLimitError, Limited};
@@ -26,7 +26,7 @@ impl Default for BodyLimits {
 }
 
 /// Reads the complete raw body. The signature covers its digest, so a partial body is useless.
-pub(crate) async fn read<B>(body: B, limits: BodyLimits) -> Result<Bytes, RejectReason>
+pub(crate) async fn read<B>(body: B, limits: BodyLimits) -> Result<Bytes, Rejection>
 where
     B: Body,
     B::Error: Into<Box<dyn StdError + Send + Sync>>,
@@ -36,10 +36,10 @@ where
         Limited::new(body, limits.max_bytes).collect(),
     )
     .await
-    .map_err(|_| RejectReason::BodyReadTimeout)?;
+    .map_err(|error| Rejection::new(RejectReason::BodyReadTimeout).with_source(error))?;
     match collected {
         Ok(collected) => Ok(collected.to_bytes()),
-        Err(error) => Err(classify(&*error)),
+        Err(error) => Err(Rejection::new(classify(&*error)).with_source(error)),
     }
 }
 
@@ -69,4 +69,39 @@ fn classify(error: &(dyn StdError + 'static)) -> RejectReason {
         source = error.source();
     }
     RejectReason::BodyReadFailed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::StreamBody;
+
+    /// Body failures retain the original cause for server-side diagnostics.
+    #[tokio::test]
+    async fn body_errors_preserve_their_source() {
+        for (kind, reason) in [
+            (io::ErrorKind::Other, RejectReason::BodyReadFailed),
+            (
+                io::ErrorKind::ConnectionReset,
+                RejectReason::ClientDisconnected,
+            ),
+        ] {
+            let body = StreamBody::new(futures_util::stream::iter([Err::<
+                http_body::Frame<Bytes>,
+                _,
+            >(io::Error::new(
+                kind,
+                "original body error",
+            ))]));
+            let rejection = read(body, BodyLimits::default()).await.unwrap_err();
+            assert_eq!(rejection.reason, reason);
+            let source = rejection
+                .source()
+                .unwrap()
+                .downcast_ref::<io::Error>()
+                .unwrap();
+            assert_eq!(source.kind(), kind);
+            assert_eq!(source.to_string(), "original body error");
+        }
+    }
 }

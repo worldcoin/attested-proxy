@@ -9,7 +9,10 @@ use std::{
     time::Instant,
 };
 
-use attested_request::{Rejection, Verifier};
+use attested_request::{
+    RejectReason, Rejection, Verifier,
+    profile::{INTEGRITY_TOKEN_HEADER, SIGNATURE_HEADER, SIGNATURE_INPUT_HEADER},
+};
 use bytes::Bytes;
 use http::{HeaderValue, Request, Response, header::CONTENT_TYPE};
 use http_body::Body;
@@ -91,13 +94,22 @@ where
         Box::pin(async move {
             let started = Instant::now();
             let (mut head, body) = request.into_parts();
-            let verdict = match body::read(body, limits).await {
-                Ok(body) => verifier
-                    .verify(&head, &body)
-                    .await
-                    .map(|context| (context, body)),
-                Err(reason) => Err(Rejection::new(reason)),
-            };
+            let verdict = async {
+                if [
+                    INTEGRITY_TOKEN_HEADER,
+                    SIGNATURE_INPUT_HEADER,
+                    SIGNATURE_HEADER,
+                ]
+                .iter()
+                .any(|name| !head.headers.contains_key(*name))
+                {
+                    return Err(Rejection::new(RejectReason::HeadersMissing));
+                }
+                let body = body::read(body, limits).await?;
+                let context = verifier.verify(&head, &body).await?;
+                Ok((context, body))
+            }
+            .await;
             match verdict {
                 Ok((context, body)) => {
                     record_verified(&context, started);

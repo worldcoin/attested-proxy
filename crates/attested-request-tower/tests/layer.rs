@@ -89,17 +89,57 @@ async fn a_rejected_request_never_reaches_the_inner_service() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
+/// Missing signature headers are rejected before the body is polled.
 #[tokio::test]
-async fn an_unsigned_request_is_refused() {
+async fn requests_missing_signature_headers_are_refused_without_reading_the_body() {
     let client = TestClient::new(Platform::Ios, AUTHORITY);
-    let service = layer(&client).layer(service_fn(|request| echo(Arc::default(), request)));
-    let request = Request::post("/v1/config")
-        .body(Full::new(Bytes::new()))
-        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&calls);
+    let service = layer(&client).layer(service_fn(move |request| {
+        echo(Arc::clone(&counter), request)
+    }));
+    for header in ["integrity-token", "signature-input", "signature"] {
+        let (mut head, _) = client.request("POST", "/v1/config", b"{}").into_parts();
+        head.headers.remove(header);
+        let body = StreamBody::new(futures_util::stream::poll_fn(
+            |_| -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, Infallible>>> {
+                panic!("unsigned request body must not be polled")
+            },
+        ));
+        let response = service
+            .clone()
+            .oneshot(Request::from_parts(head, body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(body_text(response).await, r#"{"error":"headers_missing"}"#);
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
 
-    let response = service.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(body_text(response).await, r#"{"error":"headers_missing"}"#);
+/// Body error causes stay server-side and never reach the downstream service.
+#[tokio::test]
+async fn body_errors_do_not_expose_their_source_to_clients() {
+    let client = TestClient::new(Platform::Ios, AUTHORITY);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&calls);
+    let service = layer(&client).layer(service_fn(move |request| {
+        echo(Arc::clone(&counter), request)
+    }));
+    let (head, _) = client.request("POST", "/v1/config", b"{}").into_parts();
+    let body = StreamBody::new(futures_util::stream::iter([Err::<
+        http_body::Frame<Bytes>,
+        _,
+    >(std::io::Error::other(
+        "internal body error",
+    ))]));
+    let response = service
+        .oneshot(Request::from_parts(head, body))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body_text(response).await, r#"{"error":"body_read_failed"}"#);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
