@@ -52,6 +52,7 @@ fn signature_base_vectors() {
         let uri: http::Uri = text(&case["target"]).parse().unwrap();
         let body = STANDARD.decode(text(&case["body_base64"])).unwrap();
         let values = CanonicalRequest::from_http(&http::Method::GET, &uri, "https", "h", &body)
+            .unwrap()
             .component_values("t");
         let expected = &case["expected"];
         assert_eq!(values.path, text(&expected["@path"]), "{name}");

@@ -3,6 +3,7 @@
 use std::fmt;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use http::uri::{Authority, InvalidUri};
 use sha2::{Digest, Sha256};
 
 use crate::{profile::Component, signature::SignatureParams};
@@ -11,11 +12,11 @@ use crate::{profile::Component, signature::SignatureParams};
 ///
 /// `scheme` and `authority` are what the client dialled. A verifier takes them from its own
 /// configuration, never from the request's `Host` header, which infrastructure may rewrite.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CanonicalRequest<'a> {
     method: &'a str,
     scheme: &'a str,
-    authority: &'a str,
+    authority: Authority,
     path: &'a str,
     query: Option<&'a str>,
     body: &'a [u8],
@@ -23,34 +24,40 @@ pub struct CanonicalRequest<'a> {
 
 impl<'a> CanonicalRequest<'a> {
     /// A request from its parts. `path` is percent-encoded and `query` excludes the leading `?`.
-    #[must_use]
-    pub const fn new(
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `authority` cannot be parsed as a URI authority.
+    pub fn new(
         method: &'a str,
         scheme: &'a str,
         authority: &'a str,
         path: &'a str,
         query: Option<&'a str>,
         body: &'a [u8],
-    ) -> Self {
-        Self {
+    ) -> Result<Self, InvalidUri> {
+        Ok(Self {
             method,
             scheme,
-            authority,
+            authority: authority.parse()?,
             path,
             query,
             body,
-        }
+        })
     }
 
     /// A received request, with `scheme` and `authority` from verifier configuration.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `authority` cannot be parsed as a URI authority.
     pub fn from_http(
         method: &'a http::Method,
         uri: &'a http::Uri,
         scheme: &'a str,
         authority: &'a str,
         body: &'a [u8],
-    ) -> Self {
+    ) -> Result<Self, InvalidUri> {
         Self::new(
             method.as_str(),
             scheme,
@@ -62,12 +69,20 @@ impl<'a> CanonicalRequest<'a> {
     }
 
     /// The values the covered components resolve to, with `integrity_token` as the token.
+    /// Scheme and host are lowercased, and the HTTP(S) default port is omitted.
     #[must_use]
     pub fn component_values(&self, integrity_token: &str) -> ComponentValues {
+        let scheme = self.scheme.to_ascii_lowercase();
+        let authority = match (scheme.as_str(), self.authority.port_u16()) {
+            ("http", Some(80)) | ("https", Some(443)) => self.authority.host(),
+            _ => self.authority.as_str(),
+        }
+        .to_ascii_lowercase();
+
         ComponentValues {
             method: self.method.to_owned(),
-            scheme: self.scheme.to_owned(),
-            authority: self.authority.to_owned(),
+            scheme,
+            authority,
             path: if self.path.is_empty() { "/" } else { self.path }.to_owned(),
             query: format!("?{}", self.query.unwrap_or_default()),
             content_digest: content_digest(self.body),

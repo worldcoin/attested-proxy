@@ -34,6 +34,7 @@ fn reference_base(signature_input: &str) -> String {
             None,
             b"",
         )
+        .unwrap()
         .component_values("eyJhbGciOi.test")
     };
     values.signature_base(&params).as_str().to_owned()
@@ -54,6 +55,30 @@ fn signer_output_is_the_canonical_serialization() {
     .unwrap();
     assert_eq!(params.to_field(), REFERENCE_INPUT);
     assert_eq!(SignatureParams::parse(&params.to_field()).unwrap(), params);
+}
+
+#[test]
+/// Construction rejects values that cannot round-trip through the parser.
+fn constructor_rejects_invalid_parameters() {
+    for (created, nonce, alg, param) in [
+        (0, "n", "a", Param::Created),
+        (-1, "n", "a", Param::Created),
+        (1_000_000_000_000_000, "n", "a", Param::Created),
+        (1, "", "a", Param::Nonce),
+        (1, "n", "", Param::Alg),
+        (1, "\n", "a", Param::Nonce),
+        (1, "n", "\n", Param::Alg),
+    ] {
+        assert_eq!(
+            SignatureParams::new(created, nonce, alg),
+            Err(SignatureInputError::InvalidParameter(param)),
+        );
+    }
+
+    for created in [1, 999_999_999_999_999] {
+        let params = SignatureParams::new(created, "n", "a").unwrap();
+        assert_eq!(SignatureParams::parse(&params.to_field()).unwrap(), params);
+    }
 }
 
 #[test]
@@ -271,11 +296,72 @@ fn nonce_rules() {
 }
 
 #[test]
+/// Equivalent origins produce identical signed bytes on both construction paths.
+fn origin_components_are_normalized() {
+    let params = SignatureParams::parse(REFERENCE_INPUT).unwrap();
+    let uri: http::Uri = "/a%20b?x=%2F".parse().unwrap();
+    for (scheme, authority, expected_scheme, expected_authority) in [
+        ("HTTPS", "API.EXAMPLE.COM", "https", "api.example.com"),
+        ("https", "api.example.com:443", "https", "api.example.com"),
+        ("HTTP", "API.EXAMPLE.COM:80", "http", "api.example.com"),
+        ("https", "API.EXAMPLE.COM:00443", "https", "api.example.com"),
+        ("https", "[2001:DB8::1]:443", "https", "[2001:db8::1]"),
+        ("http", "[2001:DB8::1]:80", "http", "[2001:db8::1]"),
+        ("https", "[2001:DB8::443]", "https", "[2001:db8::443]"),
+        ("https", "API.EXAMPLE.COM:80", "https", "api.example.com:80"),
+        ("http", "API.EXAMPLE.COM:443", "http", "api.example.com:443"),
+        (
+            "https",
+            "API.EXAMPLE.COM:8443",
+            "https",
+            "api.example.com:8443",
+        ),
+    ] {
+        let expected = CanonicalRequest::new(
+            "GET",
+            expected_scheme,
+            expected_authority,
+            "/a%20b",
+            Some("x=%2F"),
+            b"body",
+        )
+        .unwrap()
+        .signature_base(&params, "t");
+        let request =
+            CanonicalRequest::new("GET", scheme, authority, "/a%20b", Some("x=%2F"), b"body")
+                .unwrap();
+        let values = request.component_values("t");
+        assert_eq!(values.scheme, expected_scheme);
+        assert_eq!(values.authority, expected_authority);
+        assert_eq!(request.signature_base(&params, "t"), expected);
+        assert_eq!(
+            CanonicalRequest::from_http(&http::Method::GET, &uri, scheme, authority, b"body")
+                .unwrap()
+                .signature_base(&params, "t"),
+            expected,
+        );
+    }
+}
+
+#[test]
+/// Authority parse failures propagate through both constructors.
+fn malformed_authorities_are_rejected() {
+    let uri = http::Uri::from_static("/");
+    for authority in ["", "bad host", "example.com/path", "[::1", "example.com\n"] {
+        assert!(CanonicalRequest::new("GET", "https", authority, "/", None, b"").is_err());
+        assert!(
+            CanonicalRequest::from_http(&http::Method::GET, &uri, "https", authority, b"").is_err()
+        );
+    }
+}
+
+#[test]
 fn derived_components() {
     let params = SignatureParams::parse(REFERENCE_INPUT).unwrap();
     let base =
         |request: CanonicalRequest<'_>| request.signature_base(&params, "t").as_str().to_owned();
-    let request = |path, query| CanonicalRequest::new("GET", "https", "h", path, query, b"");
+    let request =
+        |path, query| CanonicalRequest::new("GET", "https", "h", path, query, b"").unwrap();
 
     assert!(base(request("", None)).contains("\"@path\": /\n\"@query\": ?\n"));
     assert!(base(request("/a%20b", Some(""))).contains("\"@path\": /a%20b\n\"@query\": ?\n"));

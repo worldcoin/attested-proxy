@@ -95,10 +95,20 @@ impl SignatureParams {
     ///
     /// # Errors
     ///
-    /// Returns [`SignatureInputError::InvalidParameter`] when `created` is outside the Structured
-    /// Fields integer range or when `nonce` or `alg` is not a printable ASCII string.
+    /// Returns [`SignatureInputError::InvalidParameter`] when `created` is nonpositive or outside
+    /// the Structured Fields integer range, or `nonce` or `alg` is empty or not printable ASCII.
     pub fn new(created: i64, nonce: &str, alg: &str) -> Result<Self, SignatureInputError> {
         let invalid = SignatureInputError::InvalidParameter;
+        if created <= 0 {
+            return Err(invalid(Param::Created));
+        }
+        if nonce.is_empty() {
+            return Err(invalid(Param::Nonce));
+        }
+        if alg.is_empty() {
+            return Err(invalid(Param::Alg));
+        }
+
         Ok(Self {
             components: Component::ALL.to_vec(),
             created: Integer::try_from(created).map_err(|_| invalid(Param::Created))?,
