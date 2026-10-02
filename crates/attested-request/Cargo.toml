@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
 license.workspace = true
+license-file.workspace = true
 homepage.workspace = true
 repository.workspace = true
 keywords = ["rfc9421", "http-signatures", "app-attest", "attestation"]
