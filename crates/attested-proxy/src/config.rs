@@ -48,9 +48,9 @@ pub struct Config {
     #[arg(long, env = "ATTESTED_PROXY_ISSUER")]
     pub issuer: String,
 
-    /// The Attestation Gateway JWKS URL.
+    /// The Attestation Gateway HTTPS JWKS URL.
     #[arg(long, env = "ATTESTED_PROXY_JWKS_URL")]
-    pub jwks_url: String,
+    pub jwks_url: reqwest::Url,
 
     /// Paths forwarded without verification, comma-separated and matched exactly. Use for the
     /// load balancer's health check, never for application routes.

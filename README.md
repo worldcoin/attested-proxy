@@ -72,7 +72,7 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_SCHEME` | `https` | As signed in `@scheme`. `wss://` clients sign `https`. |
 | `ATTESTED_PROXY_AUDIENCES` | required | Accepted token audiences, comma-separated. |
 | `ATTESTED_PROXY_ISSUER` | required | The Attestation Gateway `iss`. |
-| `ATTESTED_PROXY_JWKS_URL` | required | The Attestation Gateway JWKS. |
+| `ATTESTED_PROXY_JWKS_URL` | required | The Attestation Gateway HTTPS JWKS URL. |
 | `ATTESTED_PROXY_UNPROTECTED_PATHS` | none | Exact paths forwarded without verification. |
 | `ATTESTED_PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener. |
 | `ATTESTED_PROXY_ADMIN_LISTEN` | `0.0.0.0:8081` | `/health` (liveness) and `/ready` (readiness). |
@@ -147,6 +147,11 @@ tracking additionally refuses a second use inside that window, at the cost of a 
 request path that must be up for any request to succeed. It is off unless
 `ATTESTED_PROXY_REPLAY_REDIS_URL` is set. A route whose effect can be repeated needs it; a route
 that only opens a session, such as Flamingo's WebSocket handshake, usually does not.
+
+The replay store must use `maxmemory-policy noeviction`: evicting an unexpired claim allows that
+request to be replayed. Provision enough memory for the acceptance window; when full, writes must
+fail so verification fails closed. Losing claims during a restart or failover also permits replay
+until those requests expire; configure persistence and recovery accordingly.
 
 ## Profile notes
 

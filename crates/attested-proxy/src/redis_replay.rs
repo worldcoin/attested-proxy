@@ -1,11 +1,8 @@
 //! A replay guard backed by Redis, shared by every replica that points at the same instance.
 
-use std::time::Duration;
+use std::{error::Error, time::Duration};
 
-use attested_request::{
-    replay::{ReplayGuard, ReplayGuardUnavailable},
-    token::BoxFuture,
-};
+use attested_request::{replay::ReplayGuard, token::BoxFuture};
 use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 
 const KEY_PREFIX: &str = "attested-proxy:replay:";
@@ -41,7 +38,7 @@ impl ReplayGuard for RedisReplayGuard {
         &'a self,
         binding: &'a str,
         ttl: Duration,
-    ) -> BoxFuture<'a, Result<bool, ReplayGuardUnavailable>> {
+    ) -> BoxFuture<'a, Result<bool, Box<dyn Error + Send + Sync>>> {
         let mut connection = self.connection.clone();
         let ttl_ms = u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX).max(1);
         Box::pin(async move {
@@ -53,11 +50,8 @@ impl ReplayGuard for RedisReplayGuard {
                 .arg("PX")
                 .arg(ttl_ms);
             let claim = command.query_async::<Option<String>>(&mut connection);
-            match tokio::time::timeout(self.timeout, claim).await {
-                Ok(Ok(reply)) => Ok(reply.is_some()),
-                Ok(Err(error)) => Err(ReplayGuardUnavailable(Box::new(error))),
-                Err(elapsed) => Err(ReplayGuardUnavailable(Box::new(elapsed))),
-            }
+            let reply = tokio::time::timeout(self.timeout, claim).await??;
+            Ok(reply.is_some())
         })
     }
 }

@@ -25,7 +25,7 @@ use attested_request::{
 use http::Uri;
 use rand::Rng as _;
 use tokio::net::TcpListener;
-use tokio_util::sync::CancellationToken;
+use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 
 pub mod config;
 mod forward;
@@ -66,11 +66,16 @@ pub struct ProxySettings {
 ///
 /// # Errors
 ///
-/// Returns an error when the configuration is invalid or a listener cannot be bound.
+/// Returns an error when configuration is invalid or either listener fails.
 pub async fn run(config: config::Config) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        config.jwks_url.scheme() == "https",
+        "JWKS URL must use HTTPS"
+    );
     let jwks = RemoteJwks::new(
-        &config.jwks_url,
+        config.jwks_url.as_str(),
         reqwest::Client::builder()
+            .https_only(true)
             .build()
             .context("building the JWKS client")?,
         RemoteJwksConfig::default(),
@@ -93,7 +98,7 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
             .context("configuring request verification")?,
     );
 
-    tokio::spawn(keep_jwks_fresh(jwks.clone()));
+    let _jwks_refresh = AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(jwks.clone())));
 
     let shutting_down = Arc::new(AtomicBool::new(false));
     let ready = {
@@ -108,25 +113,34 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
         .with_context(|| format!("binding the proxy listener on {}", config.listen))?;
 
     let admin_stop = CancellationToken::new();
-    let admin = tokio::spawn(serve_admin(
-        admin_listener,
-        ready,
-        admin_stop.clone().cancelled_owned(),
-    ));
+    let proxy_stop = CancellationToken::new();
+    let admin = serve_admin(admin_listener, ready, admin_stop.cancelled());
+    let proxy = Proxy::new(verifier, config.proxy_settings()).serve(listener, async {
+        tokio::select! {
+            () = shutdown_signal() => {},
+            () = proxy_stop.cancelled() => {},
+        }
+        shutting_down.store(true, Ordering::SeqCst);
+    });
+    tokio::pin!(admin, proxy);
 
-    Proxy::new(verifier, config.proxy_settings())
-        .serve(listener, async move {
-            shutdown_signal().await;
+    tokio::select! {
+        result = &mut admin => {
+            // Stop accepting traffic and drain if the health server fails.
+            tracing::error!(error = ?result, "admin server stopped unexpectedly; draining proxy");
             shutting_down.store(true, Ordering::SeqCst);
-        })
-        .await
-        .context("serving the proxy")?;
-
-    admin_stop.cancel();
-    admin
-        .await
-        .context("joining the admin server")?
-        .context("serving the admin listener")
+            proxy_stop.cancel();
+            proxy.await.context("draining the proxy after admin failure")?;
+            result.context("serving the admin listener")?;
+            anyhow::bail!("admin server stopped unexpectedly");
+        }
+        result = &mut proxy => {
+            admin_stop.cancel();
+            let admin_result = admin.await;
+            result.context("serving the proxy")?;
+            admin_result.context("serving the admin listener")
+        }
+    }
 }
 
 #[cfg(feature = "redis")]
@@ -156,7 +170,7 @@ async fn keep_jwks_fresh(jwks: RemoteJwks) {
         tokio::time::sleep(delay.mul_f64(jitter)).await;
         delay = (delay * 2).min(Duration::from_secs(30));
     }
-    let _refresh = jwks.spawn_refresh_task();
+    let _refresh = AbortOnDropHandle::new(jwks.spawn_refresh_task());
     let age = metrics::gauge!("attested_proxy.jwks.age_seconds");
     loop {
         if let Some(elapsed) = jwks.age() {
