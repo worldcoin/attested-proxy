@@ -9,7 +9,7 @@ resolver = "3"
 [workspace.package]
 edition = "2024"
 rust-version = "1.98.1"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["World Contributors"]
 readme = "README.md"
 exclude = ["tests/"]
@@ -19,8 +19,8 @@ homepage = "https://github.com/worldcoin/attested-proxy"
 repository = "https://github.com/worldcoin/attested-proxy"
 
 [workspace.dependencies]
-attested-request = { version = "0.1.0", path = "crates/attested-request" }
-attested-request-tower = { version = "0.1.0", path = "crates/attested-request-tower" }
+attested-request = { version = "0.1.1", path = "crates/attested-request" }
+attested-request-tower = { version = "0.1.1", path = "crates/attested-request-tower" }
 
 anyhow = "1"
 arc-swap = "1.7"

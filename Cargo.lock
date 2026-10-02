@@ -159,7 +159,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "attested-proxy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "attested-request",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "attested-request"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "attested-request",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "attested-request-tower"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "attested-request",
  "attested-request-tower",
