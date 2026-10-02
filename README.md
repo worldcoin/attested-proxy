@@ -189,7 +189,23 @@ nix flake check        # clippy, tests, fmt and the package, as in CI
 docker build .
 ```
 
+## Container image
+
+The sidecar image is published to GHCR as `ghcr.io/worldcoin/attested-proxy`:
+
+- every push to `main` publishes `:latest` and `:sha-<sha>`;
+- a pushed `attested-proxy/vX.Y.Z` tag (or a manual run of the [release image] workflow) publishes
+  `:vX.Y.Z` and opens a draft GitHub release recording the image digest;
+- pull requests that touch the build inputs build without pushing.
+
+Deploy by digest (`ghcr.io/worldcoin/attested-proxy@sha256:…`), not by tag.
+
+```sh
+gh workflow run release-image.yml -f ref=main -f version=0.1.0 -f dry_run=false
+```
+
 [Attestation Gateway]: https://github.com/worldcoin/attestation-gateway
 [RFC 9421]: https://www.rfc-editor.org/rfc/rfc9421.html
 [RFC 9421 Integrity Request Signing Profile]: https://app.notion.com/p/3888614bdf8c819b8cc3f9a3a05b10a7
 [Authorized Principal]: https://app.notion.com/p/36e8614bdf8c80d797fff43a85f8853d
+[release image]: .github/workflows/release-image.yml
