@@ -9,15 +9,26 @@ homepage.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+default = ["redis"]
+# A Redis-backed replay guard, shared by every replica.
+redis = ["dep:redis"]
+
 [dependencies]
-attested-request.workspace = true
+anyhow.workspace = true
+attested-request = { workspace = true, features = ["remote-jwks"] }
 attested-request-tower.workspace = true
 bytes.workspace = true
+clap.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server-auto", "server-graceful", "tokio"] }
 metrics.workspace = true
+rand.workspace = true
+redis = { workspace = true, optional = true, features = ["connection-manager", "tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
+reqwest.workspace = true
+telemetry-batteries = { workspace = true, features = ["metrics-statsd"] }
 tokio.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 tower = { workspace = true, features = ["util"] }
