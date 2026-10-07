@@ -136,6 +136,8 @@ SIGTERM, then drains.
 | `attested_proxy.tunnels.opened`, `.failed`, `.active` | WebSocket tunnels. |
 | `attested_proxy.connections.active` | Open client connections. |
 | `attested_proxy.jwks.age_seconds` | Age of the cached JWKS; alert well before it reaches six hours, when verification starts failing. |
+| `attested_proxy.jwks.usable` | `1` while the cached JWKS can verify tokens, `0` before the first fetch and once it is too stale. Alert on `0`: `age_seconds` reports nothing until a fetch succeeds. |
+| `attested_proxy.jwks.fetch_failures` | Failed startup JWKS fetches, by `class` (the HTTP status code, `timeout`, `request`, `invalid`, ...). |
 
 Client rejections are counted, not logged. Failures of our own dependencies (JWKS, replay store,
 upstream) are logged at `warn`. Tokens, signatures and bodies are never logged.
