@@ -18,7 +18,7 @@ use std::{
 use anyhow::Context as _;
 use attested_request::{
     Verifier,
-    remote_jwks::{RemoteJwks, RemoteJwksConfig},
+    remote_jwks::{JwksFetchError, RemoteJwks, RemoteJwksConfig},
     replay::ReplayGuard,
     token::TokenVerifier,
 };
@@ -74,10 +74,7 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
     );
     let jwks = RemoteJwks::new(
         config.jwks_url.as_str(),
-        reqwest::Client::builder()
-            .https_only(true)
-            .build()
-            .context("building the JWKS client")?,
+        jwks_client().build().context("building the JWKS client")?,
         RemoteJwksConfig::default(),
     );
     let tokens = TokenVerifier::new(
@@ -160,23 +157,63 @@ async fn replay_guard(_: &str, _: u64) -> anyhow::Result<Arc<dyn ReplayGuard>> {
     anyhow::bail!("replay tracking needs the `redis` feature")
 }
 
+/// Identifies the sidecar to the JWKS endpoint. Some edges, such as AWS WAF's managed rules,
+/// refuse requests without a `User-Agent`, which reqwest omits by default.
+const USER_AGENT: &str = concat!("attested-proxy/", env!("CARGO_PKG_VERSION"));
+
+fn jwks_client() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .https_only(true)
+        .user_agent(USER_AGENT)
+}
+
 /// Fetches the JWKS until it succeeds, with capped exponential backoff and jitter, then keeps it
-/// refreshed and reports its age.
+/// refreshed. Reports the cache's health throughout, including before the first success.
 async fn keep_jwks_fresh(jwks: RemoteJwks) {
+    let _report = AbortOnDropHandle::new(tokio::spawn(report_jwks_health(jwks.clone())));
     let mut delay = Duration::from_millis(500);
     while let Err(error) = jwks.refresh().await {
-        tracing::warn!(error = %error, retry_in_ms = delay.as_millis(), "initial JWKS fetch failed");
+        let class = fetch_failure_class(&error);
+        metrics::counter!("attested_proxy.jwks.fetch_failures", "class" => class.clone())
+            .increment(1);
+        tracing::warn!(
+            error = %error,
+            class,
+            retry_in_ms = delay.as_millis(),
+            "initial JWKS fetch failed",
+        );
         let jitter = rand::thread_rng().gen_range(0.5..1.0);
         tokio::time::sleep(delay.mul_f64(jitter)).await;
         delay = (delay * 2).min(Duration::from_secs(30));
     }
-    let _refresh = AbortOnDropHandle::new(jwks.spawn_refresh_task());
+    // The refresh task logs its own failures; `age_seconds` shows when they persist.
+    if let Err(error) = AbortOnDropHandle::new(jwks.spawn_refresh_task()).await {
+        tracing::error!(error = %error, "JWKS refresh task stopped");
+    }
+}
+
+async fn report_jwks_health(jwks: RemoteJwks) {
     let age = metrics::gauge!("attested_proxy.jwks.age_seconds");
+    let usable = metrics::gauge!("attested_proxy.jwks.usable");
     loop {
         if let Some(elapsed) = jwks.age() {
             age.set(elapsed.as_secs_f64());
         }
+        usable.set(if jwks.is_usable() { 1.0 } else { 0.0 });
         tokio::time::sleep(Duration::from_secs(15)).await;
+    }
+}
+
+/// A low-cardinality metric tag: the HTTP status code, or the kind of failure.
+fn fetch_failure_class(error: &JwksFetchError) -> String {
+    match error {
+        JwksFetchError::Status(status) => status.as_str().to_owned(),
+        JwksFetchError::Request(error) if error.is_timeout() => "timeout".to_owned(),
+        JwksFetchError::Request(_) => "request".to_owned(),
+        JwksFetchError::TooLarge => "too_large".to_owned(),
+        JwksFetchError::Invalid(_) => "invalid".to_owned(),
+        JwksFetchError::Empty => "empty".to_owned(),
+        JwksFetchError::Task(_) => "task".to_owned(),
     }
 }
 
@@ -195,5 +232,47 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = interrupt.await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{Router, http::HeaderMap, routing::get};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn the_jwks_client_identifies_itself() {
+        let app = Router::new().route(
+            "/",
+            get(|headers: HeaderMap| async move {
+                headers
+                    .get(http::header::USER_AGENT)
+                    .map(|value| value.to_str().unwrap().to_owned())
+                    .unwrap_or_default()
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        // Plain HTTP only so the test needs no certificate.
+        let client = jwks_client().https_only(false).build().unwrap();
+        let user_agent = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(user_agent, USER_AGENT);
+    }
+
+    #[test]
+    fn status_failures_are_classed_by_code() {
+        let error = JwksFetchError::Status(reqwest::StatusCode::FORBIDDEN);
+        assert_eq!(fetch_failure_class(&error), "403");
+        assert_eq!(fetch_failure_class(&JwksFetchError::Empty), "empty");
     }
 }
