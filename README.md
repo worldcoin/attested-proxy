@@ -39,8 +39,9 @@ async fn handler(AttestedKey(context): AttestedKey) -> String {
 The sidecar is the service's **only ingress**. For each request it:
 
 1. forwards it unverified if its path is listed in `ATTESTED_PROXY_UNPROTECTED_PATHS` (exact
-   match, meant for the load balancer's health check);
-2. otherwise reads the body under a size limit and deadline, and verifies the request, answering
+   match, meant for the load balancer's health check) and it does not request test-token mode;
+2. otherwise reads the body under a size limit and deadline, and verifies the request (including
+   the explicit development test-token mode below), answering
    `{"error": "<reason>"}` with the reason's status when verification fails;
 3. forwards the verified request to the one configured upstream. Clients never choose the
    destination. WebSocket upgrades are verified on the handshake and then tunnelled byte for byte.
@@ -74,6 +75,8 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_ISSUER` | required | The Attestation Gateway `iss`. |
 | `ATTESTED_PROXY_JWKS_URL` | required | The Attestation Gateway HTTPS JWKS URL. |
 | `ATTESTED_PROXY_UNPROTECTED_PATHS` | none | Exact paths forwarded without verification. |
+| `ATTESTED_PROXY_ENVIRONMENT` | `production` | `dev`, `staging` (`stage` alias), or `production`. |
+| `ATTESTED_PROXY_ALLOW_E2E_SKIP_ATTESTATION` | `false` | Permit the explicit self-signed test-token mode in dev/staging. |
 | `ATTESTED_PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener. |
 | `ATTESTED_PROXY_ADMIN_LISTEN` | `0.0.0.0:8081` | `/health` (liveness) and `/ready` (readiness). |
 | `ATTESTED_PROXY_MAX_AGE_SECS` | `300` | Oldest accepted `created`. |
@@ -87,6 +90,46 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_SHUTDOWN_GRACE_SECS` | `45` | How long in-flight work may finish after SIGTERM. |
 | `ATTESTED_PROXY_REPLAY_REDIS_URL` | none | Enables replay tracking (`redis://` or `rediss://`). |
 | `ATTESTED_PROXY_REPLAY_TIMEOUT_MS` | `250` | Deadline for one replay-store command. |
+
+### Development attestation bypass
+
+The standard client marker is one `x-e2e-skip-attestation: true` header. It selects
+self-signed test-token verification only when the deployment explicitly sets both:
+
+```text
+ATTESTED_PROXY_ENVIRONMENT=staging
+ATTESTED_PROXY_ALLOW_E2E_SKIP_ATTESTATION=true
+```
+
+`dev` is also permitted. Production rejects this opt-in at startup, and the proxy's
+runtime gate keeps production strict. The marker never triggers an automatic retry after
+real attestation fails. A `false` marker uses ordinary Gateway verification; duplicate,
+malformed or disallowed markers are rejected.
+
+The test `Integrity-Token` must be an ES256 JWT with issuer `attested-proxy-e2e`, an
+accepted audience, a required `nbf`, and an `exp` no more than 300 seconds after `nbf`.
+Both validity times are checked. Its `cnf.jwk` must be an EC P-256 public key, and its
+JWT signature must verify under that same key. The client must supply WalletKit with
+this token and its matching request signer, then send the marker. A legacy dummy token
+such as `staging-test-token` cannot authenticate this route.
+
+The full canonical request signature, platform encoding, body digest, freshness, nonce,
+audience and configured replay policy remain required. Android request signatures are
+DER ECDSA; iOS still requires the App Attest-shaped CBOR assertion encoding. No Gateway
+keys are fetched for test tokens. This proves possession of the declared test key,
+not attested hardware, app certification or user authorization. A `pass` claim does not
+upgrade a test token to attested evidence.
+
+Test requests receive a distinct test-key context and metric. They do not receive any
+`x-attested-*` upstream identity headers. All client-supplied identity and skip headers
+are stripped, and only a successfully verified test request gets the server-generated
+`x-attestation-skip: true` upstream marker. Ordinary requests continue through the trusted
+Gateway verifier, and supplying a test token without the marker fails.
+
+Enable this only after deploying an image containing this implementation. Existing mobile
+real-AG providers are unchanged: testing without native AG also requires an explicit
+nonproduction test-token provider in the client. The proxy setting does not bypass client
+issuance, enclave attestation or PCR checks, and cannot repair an undeployed ingress route.
 
 Telemetry is configured by `telemetry-batteries` (`TELEMETRY_PRESET=datadog`,
 `TELEMETRY_SERVICE_NAME`, `TELEMETRY_METRICS_BACKEND=statsd`, …), as in Flamingo.
@@ -130,6 +173,7 @@ SIGTERM, then drains.
 | Metric | |
 | --- | --- |
 | `attested_request.verified` | Verified requests, by `platform`. |
+| `attested_request.self_signed_test_verified` | Self-signed test requests, by `platform`; no attestation certified. |
 | `attested_request.rejected` | Refused requests, by `reason`, `platform` and `status`. |
 | `attested_request.verify.duration` | Verification latency, by `outcome`. |
 | `attested_proxy.upstream.errors` | Upstream failures, by `kind` (`unavailable`, `timeout`). |
