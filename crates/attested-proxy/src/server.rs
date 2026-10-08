@@ -4,9 +4,9 @@ use std::{
     collections::HashSet, convert::Infallible, future::Future, io, sync::Arc, time::Duration,
 };
 
-use attested_request::Verifier;
+use attested_request::{RejectReason, Verifier};
 use attested_request_tower::{AttestedRequest, AttestedRequestLayer};
-use http::{Request, Response};
+use http::{HeaderMap, Request, Response};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper_util::{
@@ -19,7 +19,7 @@ use tower::{Layer as _, ServiceExt as _};
 
 use crate::{
     ProxySettings,
-    forward::{ConnectionSlot, Forward, ProxyBody},
+    forward::{ConnectionSlot, Forward, ProxyBody, error_response},
 };
 
 /// The attested proxy: verifies requests and forwards them to the upstream.
@@ -37,10 +37,40 @@ struct Router {
     unprotected_paths: Arc<HashSet<String>>,
     forward: Forward,
     protected: AttestedRequest<Forward>,
+    test_protected: Option<AttestedRequest<Forward>>,
+}
+
+fn e2e_skip_requested(headers: &HeaderMap) -> Result<bool, RejectReason> {
+    let mut values = headers.get_all("x-e2e-skip-attestation").iter();
+    let Some(value) = values.next() else {
+        return Ok(false);
+    };
+    if values.next().is_some() {
+        return Err(RejectReason::E2eSkipMalformed);
+    }
+    match value.as_bytes() {
+        b"true" => Ok(true),
+        b"false" => Ok(false),
+        _ => Err(RejectReason::E2eSkipMalformed),
+    }
 }
 
 impl Router {
     async fn route(self, request: Request<Incoming>) -> Response<ProxyBody> {
+        let test_request = match e2e_skip_requested(request.headers()) {
+            Ok(requested) => requested,
+            Err(reason) => return error_response(reason.status(), reason.as_str()),
+        };
+        if test_request {
+            let Some(test_protected) = self.test_protected else {
+                let reason = RejectReason::E2eSkipNotAllowed;
+                return error_response(reason.status(), reason.as_str());
+            };
+            return match test_protected.oneshot(request).await {
+                Ok(response) => response.map(BodyExt::boxed_unsync),
+                Err(never) => match never {},
+            };
+        }
         if self.unprotected_paths.contains(request.uri().path()) {
             return self
                 .forward
@@ -69,14 +99,24 @@ impl Proxy {
             tunnels.clone(),
             force_shutdown.clone(),
         );
-        let protected = AttestedRequestLayer::new(verifier)
+        let protected = AttestedRequestLayer::new(Arc::clone(&verifier))
             .body_limits(settings.body_limits)
             .layer(forward.clone());
+        // Library callers may bypass Config::validate; production still cannot enable tests.
+        let test_protected = (settings.allow_e2e_skip_attestation
+            && settings.environment.allows_e2e_skip())
+        .then(|| {
+            AttestedRequestLayer::new(verifier)
+                .body_limits(settings.body_limits)
+                .self_signed_test_tokens()
+                .layer(forward.clone())
+        });
         Self {
             router: Router {
                 unprotected_paths: Arc::new(settings.unprotected_paths.iter().cloned().collect()),
                 forward,
                 protected,
+                test_protected,
             },
             settings: Arc::new(settings),
             capacity,

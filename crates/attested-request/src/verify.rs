@@ -9,11 +9,12 @@ use http::{HeaderMap, request::Parts, uri::Authority};
 
 use crate::{
     base::CanonicalRequest,
+    device::DeviceKey,
     profile::{Component, INTEGRITY_TOKEN_HEADER, SIGNATURE_HEADER, SIGNATURE_INPUT_HEADER},
     reject::{RejectReason, Rejection},
     replay::ReplayGuard,
     signature::{SignatureInputError, SignatureParams, parse_signature, validate_nonce},
-    token::{AttestedDevice, TokenError, TokenVerifier},
+    token::{AttestedDevice, SelfSignedTestDevice, TokenError, TokenVerifier},
 };
 
 /// Default maximum age of `created`.
@@ -56,6 +57,36 @@ pub struct VerifiedAttestedKeyContext {
     pub device: AttestedDevice,
     /// `base64(SHA-256(signature base))`, identifying this exact request.
     pub request_binding: String,
+}
+
+/// A canonical request signed by a self-signed test key, without certified attestation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedSelfSignedTestKeyContext {
+    /// The self-signed key and its test-token claims.
+    pub device: SelfSignedTestDevice,
+    /// `base64(SHA-256(signature base))`, binding this exact test request.
+    pub request_binding: String,
+}
+
+enum VerifiedToken {
+    Attested(AttestedDevice),
+    SelfSignedTest(SelfSignedTestDevice),
+}
+
+impl VerifiedToken {
+    fn key(&self) -> &DeviceKey {
+        match self {
+            Self::Attested(device) => &device.key,
+            Self::SelfSignedTest(device) => &device.key,
+        }
+    }
+
+    fn platform(&self) -> crate::Platform {
+        match self {
+            Self::Attested(device) => device.platform,
+            Self::SelfSignedTest(device) => device.platform,
+        }
+    }
 }
 
 /// Verifies canonical requests for one service.
@@ -188,6 +219,44 @@ impl Verifier {
         head: &Parts,
         body: &[u8],
     ) -> Result<VerifiedAttestedKeyContext, Rejection> {
+        let (token, request_binding) = self.verify_request(head, body, false).await?;
+        let VerifiedToken::Attested(device) = token else {
+            unreachable!("normal verification only accepts attested tokens");
+        };
+        Ok(VerifiedAttestedKeyContext {
+            device,
+            request_binding,
+        })
+    }
+
+    /// Verifies the canonical signature under a distinctly labeled self-signed test key.
+    ///
+    /// Callers must enforce explicit nonproduction opt-in. All canonical checks and optional
+    /// replay protection are identical to [`Self::verify`], but no attestation is certified.
+    ///
+    /// # Errors
+    /// Returns [`Rejection`] when the test token or canonical request is invalid.
+    pub async fn verify_self_signed_test(
+        &self,
+        head: &Parts,
+        body: &[u8],
+    ) -> Result<VerifiedSelfSignedTestKeyContext, Rejection> {
+        let (token, request_binding) = self.verify_request(head, body, true).await?;
+        let VerifiedToken::SelfSignedTest(device) = token else {
+            unreachable!("test verification only accepts self-signed test tokens");
+        };
+        Ok(VerifiedSelfSignedTestKeyContext {
+            device,
+            request_binding,
+        })
+    }
+
+    async fn verify_request(
+        &self,
+        head: &Parts,
+        body: &[u8],
+        self_signed_test: bool,
+    ) -> Result<(VerifiedToken, String), Rejection> {
         let headers = SignedHeaders::extract(&head.headers)?;
 
         let params = SignatureParams::parse(headers.signature_input).map_err(|error| {
@@ -211,12 +280,18 @@ impl Verifier {
         validate_nonce(params.nonce())
             .map_err(|error| Rejection::new(RejectReason::NonceInvalid).with_source(error))?;
 
-        let device = self
-            .tokens
-            .verify(headers.integrity_token, now)
-            .await
-            .map_err(token_rejection)?;
-        let platform = device.platform;
+        let token = if self_signed_test {
+            self.tokens
+                .verify_self_signed_test(headers.integrity_token, now)
+                .map(VerifiedToken::SelfSignedTest)
+        } else {
+            self.tokens
+                .verify(headers.integrity_token, now)
+                .await
+                .map(VerifiedToken::Attested)
+        }
+        .map_err(token_rejection)?;
+        let platform = token.platform();
         if params.alg() != platform.alg() {
             return Err(Rejection::new(RejectReason::AlgMismatch).with_platform(platform));
         }
@@ -234,8 +309,8 @@ impl Verifier {
                 .with_source(error)
         })?
         .signature_base(&params, headers.integrity_token);
-        device
-            .key
+        token
+            .key()
             .verify(platform, &base.client_data_hash(), &signature)
             .map_err(|error| {
                 Rejection::new(RejectReason::SignatureInvalid)
@@ -259,10 +334,7 @@ impl Verifier {
             }
         }
 
-        Ok(VerifiedAttestedKeyContext {
-            device,
-            request_binding,
-        })
+        Ok((token, request_binding))
     }
 
     fn check_created(&self, created: i64, now: SystemTime) -> Result<(), Rejection> {

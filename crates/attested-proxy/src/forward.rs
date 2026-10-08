@@ -11,7 +11,7 @@ use std::{
 };
 
 use attested_request::{
-    VerifiedAttestedKeyContext,
+    VerifiedAttestedKeyContext, VerifiedSelfSignedTestKeyContext,
     profile::{INTEGRITY_TOKEN_HEADER, SIGNATURE_HEADER, SIGNATURE_INPUT_HEADER},
 };
 use bytes::Bytes;
@@ -39,11 +39,6 @@ pub const KEY_THUMBPRINT_HEADER: &str = "x-attested-key-thumbprint";
 /// A verified request's binding, `base64(SHA-256(signature base))`.
 pub const REQUEST_BINDING_HEADER: &str = "x-attested-request-binding";
 
-const IDENTITY_HEADERS: [&str; 3] = [
-    PLATFORM_HEADER,
-    KEY_THUMBPRINT_HEADER,
-    REQUEST_BINDING_HEADER,
-];
 const SIGNATURE_HEADERS: [&str; 3] = [
     INTEGRITY_TOKEN_HEADER,
     SIGNATURE_INPUT_HEADER,
@@ -247,10 +242,27 @@ fn prepare_headers(
     upgrade: Option<&HeaderValue>,
 ) {
     remove_hop_by_hop(headers);
-    for name in SIGNATURE_HEADERS.into_iter().chain(IDENTITY_HEADERS) {
+    // Strip all client identities, including future x-attested-* fields.
+    let identities: Vec<_> = headers
+        .keys()
+        .filter(|name| name.as_str().starts_with("x-attested-"))
+        .cloned()
+        .collect();
+    for name in identities {
         headers.remove(name);
     }
-    if let Some(context) = extensions.get::<VerifiedAttestedKeyContext>() {
+    for name in SIGNATURE_HEADERS {
+        headers.remove(name);
+    }
+    headers.remove("x-e2e-skip-attestation");
+    headers.remove("x-attestation-skip");
+    if extensions
+        .get::<VerifiedSelfSignedTestKeyContext>()
+        .is_some()
+    {
+        // Test-key possession only; no attested identity is forwarded for this context.
+        headers.insert("x-attestation-skip", HeaderValue::from_static("true"));
+    } else if let Some(context) = extensions.get::<VerifiedAttestedKeyContext>() {
         let device = &context.device;
         let values = [
             (PLATFORM_HEADER, device.platform.as_str().to_owned()),

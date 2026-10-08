@@ -2,13 +2,51 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use http::Uri;
+
+/// The operator-declared deployment environment, independent of client claims.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum Environment {
+    /// Development deployment.
+    Dev,
+    /// Staging deployment (`stage` is also accepted on the command line).
+    #[value(alias = "stage")]
+    Staging,
+    /// Production deployment, the fail-closed default.
+    #[default]
+    Production,
+}
+
+impl Environment {
+    /// Whether this environment may explicitly enable self-signed E2E tokens.
+    #[must_use]
+    pub const fn allows_e2e_skip(self) -> bool {
+        matches!(self, Self::Dev | Self::Staging)
+    }
+}
 
 /// Verifies World App attested-key requests and proxies them to a sibling service.
 #[derive(Debug, Clone, Parser)]
 #[command(version)]
 pub struct Config {
+    /// Operator-declared environment; never derived from request headers or tokens.
+    #[arg(
+        long,
+        env = "ATTESTED_PROXY_ENVIRONMENT",
+        value_enum,
+        default_value = "production"
+    )]
+    pub environment: Environment,
+
+    /// Allow marked, canonically signed self-signed test requests in dev/staging only.
+    #[arg(
+        long,
+        env = "ATTESTED_PROXY_ALLOW_E2E_SKIP_ATTESTATION",
+        default_value_t = false
+    )]
+    pub allow_e2e_skip_attestation: bool,
+
     /// Address the proxy listens on.
     #[arg(long, env = "ATTESTED_PROXY_LISTEN", default_value = "0.0.0.0:8080")]
     pub listen: SocketAddr,
@@ -125,10 +163,23 @@ pub struct Config {
 }
 
 impl Config {
+    /// Checks operator policy before any listeners or background work start.
+    ///
+    /// # Errors
+    /// Returns an error when self-signed test tokens are enabled outside dev/staging.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.allow_e2e_skip_attestation && !self.environment.allows_e2e_skip() {
+            return Err("E2E attestation skipping is allowed only in dev or staging".to_owned());
+        }
+        Ok(())
+    }
+
     /// The runtime settings of the proxy server.
     #[must_use]
     pub fn proxy_settings(&self) -> crate::ProxySettings {
         crate::ProxySettings {
+            environment: self.environment,
+            allow_e2e_skip_attestation: self.allow_e2e_skip_attestation,
             upstream: self.upstream.clone(),
             unprotected_paths: self.unprotected_paths.clone(),
             body_limits: attested_request_tower::BodyLimits {
@@ -161,5 +212,61 @@ fn parse_path(value: &str) -> Result<String, String> {
         Ok(value.to_owned())
     } else {
         Err(format!("`{value}` is not an absolute path"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(extra: &[&str]) -> Config {
+        let mut arguments = vec![
+            "attested-proxy",
+            "--upstream",
+            "http://127.0.0.1:8000",
+            "--authority",
+            "example.test",
+            "--audiences",
+            "test-audience",
+            "--issuer",
+            "attestation.example",
+            "--jwks-url",
+            "https://attestation.example/jwks",
+        ];
+        arguments.extend_from_slice(extra);
+        Config::try_parse_from(arguments).unwrap()
+    }
+
+    #[test]
+    fn e2e_skipping_defaults_off_in_production() {
+        let config = config(&[]);
+        assert_eq!(config.environment, Environment::Production);
+        assert!(!config.allow_e2e_skip_attestation);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn e2e_skipping_requires_an_explicit_nonproduction_environment() {
+        assert!(
+            config(&["--allow-e2e-skip-attestation"])
+                .validate()
+                .is_err()
+        );
+        for environment in ["dev", "staging", "stage"] {
+            assert!(
+                config(&["--environment", environment, "--allow-e2e-skip-attestation"])
+                    .validate()
+                    .is_ok()
+            );
+        }
+        assert!(
+            config(&[
+                "--environment",
+                "production",
+                "--allow-e2e-skip-attestation"
+            ])
+            .validate()
+            .is_err()
+        );
     }
 }

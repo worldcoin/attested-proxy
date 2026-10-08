@@ -30,5 +30,5 @@ pub mod verify;
 pub use crate::{
     profile::{Component, Platform},
     reject::{RejectReason, Rejection},
-    verify::{VerifiedAttestedKeyContext, Verifier},
+    verify::{VerifiedAttestedKeyContext, VerifiedSelfSignedTestKeyContext, Verifier},
 };

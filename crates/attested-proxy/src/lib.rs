@@ -41,6 +41,10 @@ pub use crate::{
 /// Runtime settings of a [`Proxy`].
 #[derive(Debug, Clone)]
 pub struct ProxySettings {
+    /// The operator-declared deployment environment, defaulting to production in [`config::Config`].
+    pub environment: config::Environment,
+    /// Explicit test-mode opt-in, effective only in dev/staging.
+    pub allow_e2e_skip_attestation: bool,
     /// The upstream origin, `http://host:port`.
     pub upstream: Uri,
     /// Paths forwarded without verification, matched exactly.
@@ -68,6 +72,7 @@ pub struct ProxySettings {
 ///
 /// Returns an error when configuration is invalid or either listener fails.
 pub async fn run(config: config::Config) -> anyhow::Result<()> {
+    config.validate().map_err(anyhow::Error::msg)?;
     anyhow::ensure!(
         config.jwks_url.scheme() == "https",
         "JWKS URL must use HTTPS"

@@ -8,8 +8,11 @@ use std::{
 use attested_request::{
     Platform,
     device::DeviceKeyError,
-    test_util::{TestClaims, TestIssuer, test_key},
-    token::{StaticKeys, TokenError, TokenVerifier, TokenVerifierConfigError, parse_jwks},
+    test_util::{TestClaims, TestIssuer, self_signed_test_payload, sign_test_jws, test_key},
+    token::{
+        BoxFuture, IssuerKeys, KeysUnavailable, StaticKeys, TokenError, TokenVerifier,
+        TokenVerifierConfigError, parse_jwks,
+    },
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
@@ -48,6 +51,199 @@ fn payload(claims: &TestClaims, issuer: &TestIssuer) -> Value {
     let token = issuer.mint(claims);
     let payload = token.split('.').nth(1).unwrap();
     serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).unwrap()).unwrap()
+}
+
+fn test_payload() -> Value {
+    let mut claims = claims();
+    claims.expires_at = now() + Duration::from_secs(300);
+    claims.pass = None;
+    self_signed_test_payload(&claims, now())
+}
+
+fn test_token(payload: &Value) -> String {
+    sign_test_jws(
+        &test_key("device"),
+        &json!({"alg": "ES256", "typ": "JWT"}),
+        payload,
+    )
+}
+
+#[tokio::test]
+async fn self_signed_test_tokens_verify_without_a_gateway_verdict_or_kid() {
+    let issuer = issuer();
+    let verifier = verifier(&issuer);
+    for platform in [Platform::Android, Platform::Ios] {
+        for verdict in [None, Some(false), Some(true)] {
+            let mut claims = claims();
+            claims.platform = platform.as_str().to_owned();
+            claims.expires_at = now() + Duration::from_secs(300);
+            claims.pass = verdict;
+            let token = test_token(&self_signed_test_payload(&claims, now()));
+            let device = verifier.verify_self_signed_test(&token, now()).unwrap();
+            assert_eq!(device.platform, platform);
+            assert_eq!(device.audience, AUDIENCE);
+            assert_eq!(device.expires_at, now() + Duration::from_secs(300));
+            assert_eq!(
+                device.key.verifying_key(),
+                test_key("device").verifying_key()
+            );
+            assert!(
+                verifier.verify(&token, now()).await.is_err(),
+                "test evidence cannot enter the Gateway path"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn self_signed_test_tokens_require_the_exact_issuer_and_bounded_validity() {
+    let verifier = verifier(&issuer());
+    let valid = test_payload();
+    let timestamp = valid["nbf"].as_u64().unwrap();
+    let mut cases = Vec::new();
+    for (name, field, value) in [
+        ("untrusted issuer", "iss", json!("https://evil.example")),
+        ("missing issuer", "iss", Value::Null),
+        ("wrong audience", "aud", json!("another-service")),
+        ("unsupported platform", "platform", json!("web")),
+        ("expired", "exp", json!(timestamp)),
+        ("future validity", "nbf", json!(timestamp + 1)),
+        ("too long", "exp", json!(timestamp + 301)),
+        ("expiry before validity", "exp", json!(timestamp - 1)),
+    ] {
+        let mut payload = valid.clone();
+        payload[field] = value;
+        cases.push((name, test_token(&payload)));
+    }
+    for field in ["nbf", "exp", "aud", "platform", "cnf"] {
+        let mut payload = valid.clone();
+        payload.as_object_mut().unwrap().remove(field);
+        cases.push((field, test_token(&payload)));
+    }
+    for (name, token) in cases {
+        assert!(
+            verifier.verify_self_signed_test(&token, now()).is_err(),
+            "{name}"
+        );
+    }
+    // Exactly nbf is accepted and exactly exp is rejected, without time leeway.
+    let token = test_token(&valid);
+    verifier.verify_self_signed_test(&token, now()).unwrap();
+    assert!(
+        verifier
+            .verify_self_signed_test(&token, now() + Duration::from_secs(300))
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn self_signed_test_tokens_verify_the_jwt_signature_against_cnf_not_a_header_key() {
+    let verifier = verifier(&issuer());
+    let payload = test_payload();
+    let header = json!({"alg": "ES256", "typ": "JWT"});
+    let wrong_key_token = sign_test_jws(&test_key("different device"), &header, &payload);
+    assert!(matches!(
+        verifier.verify_self_signed_test(&wrong_key_token, now()),
+        Err(TokenError::BadSignature)
+    ));
+
+    let token = test_token(&payload);
+    let (input, _) = token.rsplit_once('.').unwrap();
+    let corrupt = format!("{input}.{}", URL_SAFE_NO_PAD.encode([7u8; 64]));
+    assert!(verifier.verify_self_signed_test(&corrupt, now()).is_err());
+
+    let mut swapped_payload = payload.clone();
+    let different = TestClaims::valid(
+        AUDIENCE,
+        Platform::Ios,
+        *test_key("different device").verifying_key(),
+        now(),
+    );
+    swapped_payload["cnf"] = self_signed_test_payload(&different, now())["cnf"].clone();
+    assert!(matches!(
+        verifier.verify_self_signed_test(&test_token(&swapped_payload), now()),
+        Err(TokenError::BadSignature)
+    ));
+
+    // A JWK advertised in the JOSE header must not replace the body cnf.jwk.
+    let token = sign_test_jws(
+        &test_key("different device"),
+        &json!({"alg": "ES256", "jwk": swapped_payload["cnf"]["jwk"]}),
+        &payload,
+    );
+    assert!(verifier.verify_self_signed_test(&token, now()).is_err());
+}
+
+#[tokio::test]
+async fn self_signed_test_tokens_refuse_malformed_headers_keys_and_encoding() {
+    let verifier = verifier(&issuer());
+    let payload = test_payload();
+    for header in [
+        json!({"alg": "HS256"}),
+        json!({"alg": "ES256", "crit": ["exp"]}),
+    ] {
+        let token = sign_test_jws(&test_key("device"), &header, &payload);
+        assert!(verifier.verify_self_signed_test(&token, now()).is_err());
+    }
+    for (field, value) in [
+        ("kty", "RSA"),
+        ("crv", "P-384"),
+        ("x", "!!!"),
+        ("y", "AAAA"),
+    ] {
+        let mut payload = payload.clone();
+        payload["cnf"]["jwk"][field] = json!(value);
+        assert!(
+            verifier
+                .verify_self_signed_test(&test_token(&payload), now())
+                .is_err(),
+            "{field}={value}"
+        );
+    }
+    let token = test_token(&payload);
+    for token in [
+        "not.a.jwt".to_owned(),
+        format!("{token}.extra"),
+        format!("{token}="),
+    ] {
+        assert!(verifier.verify_self_signed_test(&token, now()).is_err());
+    }
+}
+
+struct CountUnavailableKeys(std::sync::atomic::AtomicUsize);
+
+impl IssuerKeys for CountUnavailableKeys {
+    fn key<'a>(
+        &'a self,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<Option<p256::ecdsa::VerifyingKey>, KeysUnavailable>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async { Err(KeysUnavailable("offline".into())) })
+    }
+}
+
+#[tokio::test]
+async fn self_signed_test_verification_never_resolves_gateway_keys() {
+    let issuer = issuer();
+    let keys = Arc::new(CountUnavailableKeys(std::sync::atomic::AtomicUsize::new(0)));
+    let verifier = TokenVerifier::new(
+        [(issuer.issuer.clone(), keys.clone() as Arc<dyn IssuerKeys>)],
+        [AUDIENCE.to_owned()],
+    )
+    .unwrap();
+    // Even a claimed kid matching a Gateway key does not cause a lookup.
+    let token = sign_test_jws(
+        &test_key("device"),
+        &json!({"alg": "ES256", "kid": issuer.kid}),
+        &test_payload(),
+    );
+    verifier.verify_self_signed_test(&token, now()).unwrap();
+    assert_eq!(keys.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(matches!(
+        verifier.verify(&issuer.mint(&claims()), now()).await,
+        Err(TokenError::KeysUnavailable(_))
+    ));
+    assert_eq!(keys.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

@@ -11,7 +11,9 @@ use attested_request::{
     base::CanonicalRequest,
     replay::{InMemoryReplayGuard, ReplayGuard},
     sign::{SignedHeaders, sign_request_at},
-    test_util::{SoftwareSigner, TestClaims, TestIssuer, test_key},
+    test_util::{
+        SoftwareSigner, TestClaims, TestIssuer, self_signed_test_payload, sign_test_jws, test_key,
+    },
     token::{BoxFuture, IssuerKeys, KeysUnavailable, TokenVerifier},
     verify::{FixedClock, VerifierConfigError},
 };
@@ -64,6 +66,39 @@ impl Harness {
         );
         edit(&mut claims);
         self.issuer.mint(&claims)
+    }
+
+    fn self_signed_token(&self) -> String {
+        let mut claims = TestClaims::valid(
+            AUDIENCE,
+            self.platform(),
+            self.signer.verifying_key(),
+            self.now,
+        );
+        claims.expires_at = self.now + Duration::from_secs(300);
+        claims.pass = None;
+        sign_test_jws(
+            &test_key("device"),
+            &serde_json::json!({"alg": "ES256"}),
+            &self_signed_test_payload(&claims, self.now),
+        )
+    }
+
+    fn self_signed_request(
+        &self,
+        method: &'static str,
+        target: &'static str,
+        body: &'static [u8],
+    ) -> Outgoing {
+        self.sign_as(
+            method,
+            target,
+            body,
+            AUTHORITY,
+            &self.self_signed_token(),
+            self.created(),
+            NONCE,
+        )
     }
 
     fn verifier(&self) -> Verifier {
@@ -165,6 +200,17 @@ async fn verify(verifier: &Verifier, (parts, body): (Parts, Vec<u8>)) -> Result<
         .map_err(|rejection| rejection.reason)
 }
 
+async fn verify_test(
+    verifier: &Verifier,
+    (parts, body): (Parts, Vec<u8>),
+) -> Result<(), RejectReason> {
+    verifier
+        .verify_self_signed_test(&parts, &body)
+        .await
+        .map(|_| ())
+        .map_err(|rejection| rejection.reason)
+}
+
 fn with_header(
     mut received: (Parts, Vec<u8>),
     name: &'static str,
@@ -175,6 +221,226 @@ fn with_header(
 }
 
 const PLATFORMS: [Platform; 2] = [Platform::Ios, Platform::Android];
+
+#[tokio::test]
+async fn self_signed_test_requests_verify_both_platform_codecs_without_gateway_keys() {
+    for platform in PLATFORMS {
+        let harness = Harness::new(platform);
+        let verifier =
+            harness.verifier_for(AUTHORITY, Arc::new(UnavailableKeys), |builder| builder);
+        let outgoing = harness.self_signed_request("POST", "/v1/config?sub=alice", BODY);
+        let (parts, body) = outgoing.received();
+        let context = verifier
+            .verify_self_signed_test(&parts, &body)
+            .await
+            .unwrap();
+        assert_eq!(context.device.platform, platform);
+        assert_eq!(context.device.audience, AUDIENCE);
+        assert_eq!(context.request_binding, outgoing.headers.request_binding);
+        assert_eq!(
+            context.device.key.verifying_key(),
+            &harness.signer.verifying_key()
+        );
+        assert!(
+            verifier.verify(&parts, &body).await.is_err(),
+            "self-signed evidence cannot enter normal verification"
+        );
+    }
+}
+
+#[tokio::test]
+async fn self_signed_test_requests_still_bind_method_path_query_body_token_and_authority() {
+    for platform in PLATFORMS {
+        let harness = Harness::new(platform);
+        let verifier = harness.verifier();
+        let outgoing = harness.self_signed_request("POST", "/v1/config?sub=alice", BODY);
+        for (name, received) in [
+            (
+                "method",
+                outgoing.received_as("PUT", "/v1/config?sub=alice", BODY),
+            ),
+            (
+                "path",
+                outgoing.received_as("POST", "/v1/other?sub=alice", BODY),
+            ),
+            (
+                "query",
+                outgoing.received_as("POST", "/v1/config?sub=bob", BODY),
+            ),
+            (
+                "body",
+                outgoing.received_as("POST", "/v1/config?sub=alice", b"{}"),
+            ),
+        ] {
+            assert_eq!(
+                verify_test(&verifier, received).await,
+                Err(RejectReason::SignatureInvalid),
+                "{platform}: {name}"
+            );
+        }
+        let another_authority = harness.sign_as(
+            "POST",
+            "/v1/config?sub=alice",
+            BODY,
+            "other.example",
+            &harness.self_signed_token(),
+            harness.created(),
+            NONCE,
+        );
+        assert_eq!(
+            verify_test(&verifier, another_authority.received()).await,
+            Err(RejectReason::SignatureInvalid)
+        );
+
+        // A different, independently valid test JWT is nevertheless covered by the request signature.
+        let mut claims = TestClaims::valid(
+            AUDIENCE,
+            platform,
+            harness.signer.verifying_key(),
+            harness.now,
+        );
+        claims.expires_at = harness.now + Duration::from_secs(299);
+        let another_token = sign_test_jws(
+            &test_key("device"),
+            &serde_json::json!({"alg": "ES256"}),
+            &self_signed_test_payload(&claims, harness.now),
+        );
+        assert_eq!(
+            verify_test(
+                &verifier,
+                with_header(outgoing.received(), "integrity-token", &another_token)
+            )
+            .await,
+            Err(RejectReason::SignatureInvalid)
+        );
+    }
+}
+
+#[tokio::test]
+async fn self_signed_test_requests_reject_a_request_signed_by_a_different_key() {
+    for platform in PLATFORMS {
+        let harness = Harness::new(platform);
+        let mut other = Harness::new(platform);
+        other.signer = SoftwareSigner::new(test_key("other device"), platform);
+        let outgoing = other.sign_as(
+            "GET",
+            "/v1/matches",
+            b"",
+            AUTHORITY,
+            &harness.self_signed_token(),
+            harness.created(),
+            NONCE,
+        );
+        assert_eq!(
+            verify_test(&harness.verifier(), outgoing.received()).await,
+            Err(RejectReason::SignatureInvalid)
+        );
+    }
+}
+
+#[tokio::test]
+async fn self_signed_test_requests_keep_freshness_nonce_and_header_requirements() {
+    for platform in PLATFORMS {
+        let harness = Harness::new(platform);
+        let verifier = harness.verifier();
+        let outgoing = harness.self_signed_request("GET", "/v1/matches", b"");
+        for header in ["integrity-token", "signature-input", "signature"] {
+            let mut received = outgoing.received();
+            received.0.headers.remove(header);
+            assert_eq!(
+                verify_test(&verifier, received).await,
+                Err(RejectReason::HeadersMissing),
+                "{platform}: {header}"
+            );
+        }
+        for (offset, expected) in [
+            (-301, RejectReason::CreatedTooOld),
+            (61, RejectReason::CreatedTooFarInFuture),
+        ] {
+            let outgoing = harness.sign_as(
+                "GET",
+                "/v1/matches",
+                b"",
+                AUTHORITY,
+                &harness.self_signed_token(),
+                harness.created() + offset,
+                NONCE,
+            );
+            assert_eq!(
+                verify_test(&verifier, outgoing.received()).await,
+                Err(expected)
+            );
+        }
+        let bad_nonce = outgoing
+            .headers
+            .signature_input
+            .replace(NONCE, "MDEyMzQ1Njc4OQ==");
+        assert_eq!(
+            verify_test(
+                &verifier,
+                with_header(outgoing.received(), "signature-input", &bad_nonce)
+            )
+            .await,
+            Err(RejectReason::NonceInvalid)
+        );
+        let malformed_codec = attested_request::signature::signature_field(b"not DER or CBOR");
+        assert_eq!(
+            verify_test(
+                &verifier,
+                with_header(outgoing.received(), "signature", &malformed_codec)
+            )
+            .await,
+            Err(RejectReason::SignatureInvalid)
+        );
+        for (header, expected) in [
+            ("integrity-token", RejectReason::IntegrityTokenInvalid),
+            ("signature-input", RejectReason::SignatureInputMalformed),
+            ("signature", RejectReason::SignatureMalformed),
+        ] {
+            let mut received = outgoing.received();
+            let value = received.0.headers[header].clone();
+            received.0.headers.append(header, value);
+            assert_eq!(verify_test(&verifier, received).await, Err(expected));
+        }
+    }
+}
+
+#[tokio::test]
+async fn self_signed_test_requests_keep_replay_protection_and_do_not_consume_on_bad_signature() {
+    for platform in PLATFORMS {
+        let harness = Harness::new(platform);
+        let verifier = harness.verifier_with(|builder| {
+            builder.replay_guard(Arc::new(InMemoryReplayGuard::default()))
+        });
+        let outgoing = harness.self_signed_request("POST", "/v1/config", BODY);
+        assert_eq!(
+            verify_test(
+                &verifier,
+                outgoing.received_as("POST", "/v1/config", b"tampered")
+            )
+            .await,
+            Err(RejectReason::SignatureInvalid)
+        );
+        assert_eq!(verify_test(&verifier, outgoing.received()).await, Ok(()));
+        assert_eq!(
+            verify_test(&verifier, outgoing.received()).await,
+            Err(RejectReason::Replayed)
+        );
+    }
+    let harness = Harness::new(Platform::Android);
+    let verifier =
+        harness.verifier_with(|builder| builder.replay_guard(Arc::new(UnavailableGuard)));
+    assert_eq!(
+        verify_test(
+            &verifier,
+            harness
+                .self_signed_request("GET", "/v1/matches", b"")
+                .received()
+        )
+        .await,
+        Err(RejectReason::NonceStoreUnavailable)
+    );
+}
 
 #[tokio::test]
 async fn valid_requests_verify() {

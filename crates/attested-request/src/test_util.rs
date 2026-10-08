@@ -14,7 +14,33 @@ use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::{profile::Platform, sign::Signer, token::StaticKeys};
+use crate::{
+    profile::Platform,
+    sign::Signer,
+    token::{BoxFuture, IssuerKeys, KeysUnavailable, StaticKeys},
+};
+
+/// An offline Gateway key provider, counting every attempted lookup.
+#[derive(Default)]
+pub struct UnavailableTestKeys(std::sync::atomic::AtomicUsize);
+
+impl UnavailableTestKeys {
+    /// Number of attempted Gateway key lookups.
+    #[must_use]
+    pub fn calls(&self) -> usize {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl IssuerKeys for UnavailableTestKeys {
+    fn key<'a>(
+        &'a self,
+        _: &'a str,
+    ) -> BoxFuture<'a, Result<Option<VerifyingKey>, KeysUnavailable>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async { Err(KeysUnavailable("offline test Gateway".into())) })
+    }
+}
 
 /// A deterministic P-256 key derived from `seed`, so that tests and vectors are reproducible.
 ///
@@ -199,17 +225,48 @@ impl TestIssuer {
     /// Signs an arbitrary header and payload, for malformed-token tests.
     #[must_use]
     pub fn sign_jws(&self, header: &serde_json::Value, payload: &serde_json::Value) -> String {
-        let signing_input = format!(
-            "{}.{}",
-            URL_SAFE_NO_PAD.encode(header.to_string()),
-            URL_SAFE_NO_PAD.encode(payload.to_string()),
-        );
-        let signature: Signature = self.key.sign(signing_input.as_bytes());
-        format!(
-            "{signing_input}.{}",
-            URL_SAFE_NO_PAD.encode(signature.to_bytes())
-        )
+        sign_test_jws(&self.key, header, payload)
     }
+}
+
+/// The payload for a short-lived self-signed test token, signed by its own `cnf.jwk` key.
+///
+/// The caller controls the claims so malformed-token tests need no production issuer.
+#[must_use]
+pub fn self_signed_test_payload(claims: &TestClaims, not_before: SystemTime) -> serde_json::Value {
+    let mut payload = json!({
+        "iss": crate::token::SELF_SIGNED_TEST_ISSUER,
+        "aud": claims.audience,
+        "nbf": unix_seconds(not_before),
+        "exp": unix_seconds(claims.expires_at),
+        "platform": claims.platform,
+        "cnf": { "jwk": ec_jwk(&claims.device_key) },
+    });
+    if let Some(pass) = claims.pass {
+        payload["pass"] = json!(pass);
+    }
+    payload
+}
+
+/// Signs arbitrary test JWT claims with raw 64-byte JOSE ES256 encoding.
+///
+/// Canonical request signatures deliberately use the separate platform-specific codec.
+#[must_use]
+pub fn sign_test_jws(
+    key: &SigningKey,
+    header: &serde_json::Value,
+    payload: &serde_json::Value,
+) -> String {
+    let signing_input = format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(header.to_string()),
+        URL_SAFE_NO_PAD.encode(payload.to_string()),
+    );
+    let signature: Signature = key.sign(signing_input.as_bytes());
+    format!(
+        "{signing_input}.{}",
+        URL_SAFE_NO_PAD.encode(signature.to_bytes())
+    )
 }
 
 fn ec_jwk(key: &VerifyingKey) -> serde_json::Value {
@@ -269,6 +326,24 @@ impl TestClient {
         ))
     }
 
+    /// A five-minute token signed by this client's device key, without a Gateway verdict.
+    #[must_use]
+    pub fn self_signed_test_token(&self) -> String {
+        let mut claims = TestClaims::valid(
+            &self.audience,
+            self.signer.platform(),
+            self.signer.verifying_key(),
+            self.now,
+        );
+        claims.expires_at = self.now + Duration::from_secs(300);
+        claims.pass = None;
+        sign_test_jws(
+            &self.signer.key,
+            &json!({ "alg": "ES256", "typ": "JWT" }),
+            &self_signed_test_payload(&claims, self.now),
+        )
+    }
+
     /// A verifier builder that accepts this client's requests, with the clock fixed at `now`.
     ///
     /// # Panics
@@ -295,6 +370,37 @@ impl TestClient {
     /// Never: software signing cannot fail.
     #[must_use]
     pub fn sign(&self, method: &str, target: &str, body: &[u8]) -> crate::sign::SignedHeaders {
+        self.sign_with_token(method, target, body, &self.token())
+    }
+
+    /// Signs a canonical request carrying this client's self-signed test token.
+    ///
+    /// # Panics
+    ///
+    /// Never: software signing cannot fail.
+    #[must_use]
+    pub fn self_signed_test_sign(
+        &self,
+        method: &str,
+        target: &str,
+        body: &[u8],
+    ) -> crate::sign::SignedHeaders {
+        self.sign_with_token(method, target, body, &self.self_signed_test_token())
+    }
+
+    /// Signs with a supplied token, including invalid tokens for boundary tests.
+    ///
+    /// # Panics
+    ///
+    /// Never: software signing cannot fail.
+    #[must_use]
+    pub fn sign_with_token(
+        &self,
+        method: &str,
+        target: &str,
+        body: &[u8],
+        token: &str,
+    ) -> crate::sign::SignedHeaders {
         let (path, query) = target
             .split_once('?')
             .map_or((target, None), |(path, query)| (path, Some(query)));
@@ -303,7 +409,7 @@ impl TestClient {
                 .expect("valid authority");
         let created = i64::try_from(unix_seconds(self.now)).expect("fits");
         let nonce = crate::signature::generate_nonce().expect("OS randomness");
-        crate::sign::sign_request_at(&request, &self.token(), created, &nonce, &self.signer)
+        crate::sign::sign_request_at(&request, token, created, &nonce, &self.signer)
             .expect("software signing cannot fail")
     }
 
@@ -315,6 +421,26 @@ impl TestClient {
     #[must_use]
     pub fn request(&self, method: &str, target: &str, body: &[u8]) -> http::Request<Vec<u8>> {
         let signed = self.sign(method, target, body);
+        let mut request = http::Request::builder().method(method).uri(target);
+        for (name, value) in signed.headers() {
+            request = request.header(name, value);
+        }
+        request.body(body.to_vec()).expect("valid request")
+    }
+
+    /// A self-signed test request, without the proxy's explicit opt-in marker.
+    ///
+    /// # Panics
+    ///
+    /// Never for a valid method and target.
+    #[must_use]
+    pub fn self_signed_test_request(
+        &self,
+        method: &str,
+        target: &str,
+        body: &[u8],
+    ) -> http::Request<Vec<u8>> {
+        let signed = self.self_signed_test_sign(method, target, body);
         let mut request = http::Request::builder().method(method).uri(target);
         for (name, value) in signed.headers() {
             request = request.header(name, value);

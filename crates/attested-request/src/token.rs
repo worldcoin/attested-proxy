@@ -23,6 +23,11 @@ use crate::{
 
 const TOKEN_ALG: &str = "ES256";
 
+/// The distinct issuer label for explicitly enabled self-signed E2E test tokens.
+pub const SELF_SIGNED_TEST_ISSUER: &str = "attested-proxy-e2e";
+/// The longest permitted validity interval of a self-signed E2E test token.
+pub const SELF_SIGNED_TEST_MAX_LIFETIME: Duration = Duration::from_secs(300);
+
 /// A boxed, sendable future.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -173,6 +178,19 @@ pub struct AttestedDevice {
     pub expires_at: SystemTime,
 }
 
+/// A self-signed test key. This does not prove app or device attestation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelfSignedTestDevice {
+    /// The key that signed the JWT and must sign the canonical request.
+    pub key: DeviceKey,
+    /// The request signature encoding, without a certified platform identity.
+    pub platform: Platform,
+    /// The accepted service audience.
+    pub audience: String,
+    /// When this short-lived test token expires.
+    pub expires_at: SystemTime,
+}
+
 /// Verifies integrity tokens against trusted issuers and accepted audiences.
 #[derive(Clone)]
 pub struct TokenVerifier {
@@ -234,7 +252,80 @@ struct Confirmation {
     jwk: EcJwk,
 }
 
+#[derive(Deserialize)]
+struct SelfSignedTestClaims {
+    iss: String,
+    aud: Audience,
+    exp: u64,
+    nbf: u64,
+    platform: String,
+    cnf: Confirmation,
+}
+
 impl TokenVerifier {
+    /// Verifies a distinctly labeled self-signed test token without consulting issuer keys.
+    ///
+    /// Callers must separately enforce an explicit nonproduction request policy. The `pass`
+    /// claim is ignored: this proves key possession, never app or device attestation.
+    ///
+    /// # Errors
+    /// Returns [`TokenError`] for an invalid signature, key, audience or validity interval.
+    pub fn verify_self_signed_test(
+        &self,
+        token: &str,
+        now: SystemTime,
+    ) -> Result<SelfSignedTestDevice, TokenError> {
+        let header = decode_header(token).map_err(token_error)?;
+        if header.alg != Algorithm::ES256 {
+            return Err(TokenError::UnsupportedAlgorithm);
+        }
+        if header.crit.is_some() {
+            return Err(TokenError::Malformed);
+        }
+        let unverified: SelfSignedTestClaims =
+            jsonwebtoken::dangerous::insecure_decode_claims(token).map_err(token_error)?;
+        if unverified.iss != SELF_SIGNED_TEST_ISSUER {
+            return Err(TokenError::UntrustedIssuer);
+        }
+        // Only this test profile may use the token's key. Normal verification never does.
+        let device_key = unverified.cnf.jwk.to_verifying_key()?;
+        let key = DecodingKey::from_ec_der(device_key.to_encoded_point(false).as_bytes());
+        let mut validation = self.validation.clone();
+        validation.set_issuer(&[SELF_SIGNED_TEST_ISSUER]);
+        let claims = decode::<SelfSignedTestClaims>(token, &key, &validation)
+            .map_err(token_error)?
+            .claims;
+        let lifetime = claims
+            .exp
+            .checked_sub(claims.nbf)
+            .ok_or(TokenError::Malformed)?;
+        if lifetime == 0 || lifetime > SELF_SIGNED_TEST_MAX_LIFETIME.as_secs() {
+            return Err(TokenError::Malformed);
+        }
+        let now = now
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        if now >= claims.exp {
+            return Err(TokenError::Expired);
+        }
+        if now < claims.nbf {
+            return Err(TokenError::NotYetValid);
+        }
+        let audience = self
+            .accepted_audience(&claims.aud)
+            .ok_or(TokenError::WrongAudience)?;
+        let platform =
+            Platform::from_claim(&claims.platform).ok_or(TokenError::UnsupportedPlatform)?;
+        Ok(SelfSignedTestDevice {
+            key: DeviceKey::new(device_key),
+            platform,
+            audience: audience.to_owned(),
+            expires_at: UNIX_EPOCH
+                .checked_add(Duration::from_secs(claims.exp))
+                .ok_or(TokenError::Malformed)?,
+        })
+    }
+
     /// A verifier trusting `issuers` (issuer to its keys) and accepting any of `audiences`.
     ///
     /// Accepting more than one audience lets an audience be renamed without an outage.

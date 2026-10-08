@@ -14,6 +14,10 @@ use crate::profile::Platform;
 /// additive; renaming one breaks clients that already shipped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RejectReason {
+    /// The E2E test marker is duplicated or has an unsupported value.
+    E2eSkipMalformed,
+    /// E2E test requests are not enabled for this deployment.
+    E2eSkipNotAllowed,
     /// `Integrity-Token`, `Signature-Input` or `Signature` is absent.
     HeadersMissing,
     /// The integrity token did not verify. A refreshed token may succeed.
@@ -59,6 +63,8 @@ impl RejectReason {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::E2eSkipMalformed => "e2e_skip_malformed",
+            Self::E2eSkipNotAllowed => "e2e_skip_not_allowed",
             Self::HeadersMissing => "headers_missing",
             Self::IntegrityTokenInvalid => "integrity_token_invalid",
             Self::CreatedTooOld => "created_too_old",
@@ -91,8 +97,11 @@ impl RejectReason {
             | Self::CreatedTooFarInFuture
             | Self::Replayed
             | Self::AlgMismatch => StatusCode::UNAUTHORIZED,
-            Self::DeviceIntegrityFailed | Self::SignatureInvalid => StatusCode::FORBIDDEN,
-            Self::SignatureInputMalformed
+            Self::E2eSkipNotAllowed | Self::DeviceIntegrityFailed | Self::SignatureInvalid => {
+                StatusCode::FORBIDDEN
+            }
+            Self::E2eSkipMalformed
+            | Self::SignatureInputMalformed
             | Self::SignatureMalformed
             | Self::ComponentMissing
             | Self::NonceInvalid

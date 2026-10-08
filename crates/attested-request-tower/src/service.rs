@@ -10,7 +10,8 @@ use std::{
 };
 
 use attested_request::{
-    RejectReason, Rejection, Verifier,
+    RejectReason, Rejection, VerifiedAttestedKeyContext, VerifiedSelfSignedTestKeyContext,
+    Verifier,
     profile::{INTEGRITY_TOKEN_HEADER, SIGNATURE_HEADER, SIGNATURE_INPUT_HEADER},
 };
 use bytes::Bytes;
@@ -26,6 +27,7 @@ use crate::body::{self, BodyLimits};
 pub struct AttestedRequestLayer {
     verifier: Arc<Verifier>,
     limits: BodyLimits,
+    self_signed_test: bool,
 }
 
 impl AttestedRequestLayer {
@@ -35,6 +37,7 @@ impl AttestedRequestLayer {
         Self {
             verifier,
             limits: BodyLimits::default(),
+            self_signed_test: false,
         }
     }
 
@@ -42,6 +45,15 @@ impl AttestedRequestLayer {
     #[must_use]
     pub const fn body_limits(mut self, limits: BodyLimits) -> Self {
         self.limits = limits;
+        self
+    }
+
+    /// Uses self-signed test tokens and inserts a distinct test-key context.
+    ///
+    /// The caller must enforce nonproduction opt-in and an explicit per-request test marker.
+    #[must_use]
+    pub const fn self_signed_test_tokens(mut self) -> Self {
+        self.self_signed_test = true;
         self
     }
 }
@@ -54,6 +66,7 @@ impl<S> Layer<S> for AttestedRequestLayer {
             inner,
             verifier: Arc::clone(&self.verifier),
             limits: self.limits,
+            self_signed_test: self.self_signed_test,
         }
     }
 }
@@ -64,6 +77,12 @@ pub struct AttestedRequest<S> {
     inner: S,
     verifier: Arc<Verifier>,
     limits: BodyLimits,
+    self_signed_test: bool,
+}
+
+enum VerifiedContext {
+    Attested(VerifiedAttestedKeyContext),
+    SelfSignedTest(VerifiedSelfSignedTestKeyContext),
 }
 
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
@@ -90,10 +109,14 @@ where
         let mut inner = std::mem::replace(&mut self.inner, clone);
         let verifier = Arc::clone(&self.verifier);
         let limits = self.limits;
+        let self_signed_test = self.self_signed_test;
 
         Box::pin(async move {
             let started = Instant::now();
             let (mut head, body) = request.into_parts();
+            // A verification mode must never inherit evidence from another layer.
+            head.extensions.remove::<VerifiedAttestedKeyContext>();
+            head.extensions.remove::<VerifiedSelfSignedTestKeyContext>();
             let verdict = async {
                 if [
                     INTEGRITY_TOKEN_HEADER,
@@ -106,14 +129,29 @@ where
                     return Err(Rejection::new(RejectReason::HeadersMissing));
                 }
                 let body = body::read(body, limits).await?;
-                let context = verifier.verify(&head, &body).await?;
+                let context = if self_signed_test {
+                    VerifiedContext::SelfSignedTest(
+                        verifier.verify_self_signed_test(&head, &body).await?,
+                    )
+                } else {
+                    VerifiedContext::Attested(verifier.verify(&head, &body).await?)
+                };
                 Ok((context, body))
             }
             .await;
             match verdict {
                 Ok((context, body)) => {
-                    record_verified(&context, started);
-                    head.extensions.insert(context);
+                    match context {
+                        VerifiedContext::Attested(context) => {
+                            record_verified(&context, started);
+                            head.extensions.insert(context);
+                        }
+                        VerifiedContext::SelfSignedTest(context) => {
+                            metrics::counter!("attested_request.self_signed_test_verified", "platform" => context.device.platform.as_str()).increment(1);
+                            metrics::histogram!("attested_request.verify.duration", "outcome" => "self_signed_test_verified").record(started.elapsed());
+                            head.extensions.insert(context);
+                        }
+                    }
                     let response = inner
                         .call(Request::from_parts(head, Full::new(body)))
                         .await?;
