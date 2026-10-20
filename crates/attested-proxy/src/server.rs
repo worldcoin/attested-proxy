@@ -66,6 +66,7 @@ impl Proxy {
             settings.upstream.clone(),
             settings.upstream_connect_timeout,
             settings.upstream_response_timeout,
+            settings.forward_public_key,
             tunnels.clone(),
             force_shutdown.clone(),
         );
