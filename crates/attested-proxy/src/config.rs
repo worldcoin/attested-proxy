@@ -106,6 +106,14 @@ pub struct Config {
     )]
     pub upstream_response_timeout_secs: u64,
 
+    /// Forward each verified device's complete public JWK as `x-attested-public-key`.
+    #[arg(
+        long,
+        env = "ATTESTED_PROXY_FORWARD_PUBLIC_KEY",
+        default_value_t = false
+    )]
+    pub forward_public_key: bool,
+
     /// Maximum concurrent client connections and WebSocket tunnels together.
     #[arg(long, env = "ATTESTED_PROXY_MAX_CONNECTIONS", default_value_t = 1024)]
     pub max_connections: usize,
@@ -138,6 +146,7 @@ impl Config {
             header_read_timeout: Duration::from_secs(self.header_read_timeout_secs),
             upstream_connect_timeout: Duration::from_millis(self.upstream_connect_timeout_ms),
             upstream_response_timeout: Duration::from_secs(self.upstream_response_timeout_secs),
+            forward_public_key: self.forward_public_key,
             max_connections: self.max_connections,
             shutdown_grace: Duration::from_secs(self.shutdown_grace_secs),
         }
