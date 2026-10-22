@@ -20,16 +20,18 @@ anyhow.workspace = true
 attested-request = { workspace = true, features = ["remote-jwks"] }
 attested-request-tower.workspace = true
 bytes.workspace = true
+cadence.workspace = true
 clap.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server-auto", "server-graceful", "tokio"] }
 metrics.workspace = true
+metrics-exporter-statsd.workspace = true
 rand.workspace = true
 redis = { workspace = true, optional = true, features = ["connection-manager", "tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
 reqwest.workspace = true
-telemetry-batteries = { workspace = true, features = ["metrics-statsd"] }
+telemetry-batteries.workspace = true
 tokio.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 tower = { workspace = true, features = ["util"] }
