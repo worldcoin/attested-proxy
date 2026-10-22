@@ -107,12 +107,6 @@ impl DeviceKey {
     /// for example to rate limit on.
     #[must_use]
     pub fn thumbprint(&self) -> String {
-        URL_SAFE_NO_PAD.encode(Sha256::digest(self.jwk().as_bytes()))
-    }
-
-    /// This key as a compact public JWK.
-    #[must_use]
-    pub fn jwk(&self) -> String {
         let point = self.0.to_encoded_point(false);
         let (Some(x), Some(y)) = (point.x(), point.y()) else {
             unreachable!("an uncompressed point has both coordinates");
@@ -122,7 +116,7 @@ impl DeviceKey {
             URL_SAFE_NO_PAD.encode(x),
             URL_SAFE_NO_PAD.encode(y),
         );
-        canonical
+        URL_SAFE_NO_PAD.encode(Sha256::digest(canonical.as_bytes()))
     }
 
     /// Verifies a platform signature over `client_data_hash`, which is `SHA-256(signature base)`.

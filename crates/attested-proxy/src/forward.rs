@@ -36,15 +36,12 @@ pub(crate) type ProxyBody = UnsyncBoxBody<Bytes, Box<dyn StdError + Send + Sync>
 pub const PLATFORM_HEADER: &str = "x-attested-platform";
 /// The RFC 7638 thumbprint of a verified request's device key.
 pub const KEY_THUMBPRINT_HEADER: &str = "x-attested-key-thumbprint";
-/// The complete public JWK of a verified request's device key.
-pub const PUBLIC_KEY_HEADER: &str = "x-attested-public-key";
 /// A verified request's binding, `base64(SHA-256(signature base))`.
 pub const REQUEST_BINDING_HEADER: &str = "x-attested-request-binding";
 
-const IDENTITY_HEADERS: [&str; 4] = [
+const IDENTITY_HEADERS: [&str; 3] = [
     PLATFORM_HEADER,
     KEY_THUMBPRINT_HEADER,
-    PUBLIC_KEY_HEADER,
     REQUEST_BINDING_HEADER,
 ];
 const SIGNATURE_HEADERS: [&str; 3] = [
@@ -94,7 +91,6 @@ struct Inner {
     client: Client<HttpConnector, ProxyBody>,
     upstream: Uri,
     response_timeout: Duration,
-    forward_public_key: bool,
     tunnels: TaskTracker,
     force_shutdown: CancellationToken,
 }
@@ -104,7 +100,6 @@ impl Forward {
         upstream: Uri,
         connect_timeout: Duration,
         response_timeout: Duration,
-        forward_public_key: bool,
         tunnels: TaskTracker,
         force_shutdown: CancellationToken,
     ) -> Self {
@@ -117,7 +112,6 @@ impl Forward {
                 client,
                 upstream,
                 response_timeout,
-                forward_public_key,
                 tunnels,
                 force_shutdown,
             }),
@@ -135,12 +129,7 @@ impl Forward {
         let slot = request.extensions().get::<ConnectionSlot>().cloned();
 
         let (mut head, body) = request.into_parts();
-        prepare_headers(
-            &mut head.headers,
-            &head.extensions,
-            upgrade.as_ref(),
-            inner.forward_public_key,
-        );
+        prepare_headers(&mut head.headers, &head.extensions, upgrade.as_ref());
         // The cleartext upstream client uses HTTP/1, regardless of the inbound protocol.
         head.version = http::Version::HTTP_11;
         head.uri = upstream_uri(&inner.upstream, head.uri.path_and_query());
@@ -256,7 +245,6 @@ fn prepare_headers(
     headers: &mut HeaderMap,
     extensions: &http::Extensions,
     upgrade: Option<&HeaderValue>,
-    forward_public_key: bool,
 ) {
     remove_hop_by_hop(headers);
     for name in SIGNATURE_HEADERS.into_iter().chain(IDENTITY_HEADERS) {
@@ -268,9 +256,7 @@ fn prepare_headers(
             (PLATFORM_HEADER, device.platform.as_str().to_owned()),
             (KEY_THUMBPRINT_HEADER, device.key.thumbprint()),
             (REQUEST_BINDING_HEADER, context.request_binding.clone()),
-        ]
-        .into_iter()
-        .chain(forward_public_key.then(|| (PUBLIC_KEY_HEADER, device.key.jwk())));
+        ];
         for (name, value) in values {
             let value = HeaderValue::from_str(&value)
                 .expect("base64 and platform names are valid header values");
