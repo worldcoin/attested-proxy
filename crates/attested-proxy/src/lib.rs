@@ -5,8 +5,7 @@
 //! `attested-request-tower`, except the exact paths listed as unprotected (the load balancer's
 //! health check), and forwards it to one fixed upstream, tunnelling WebSocket upgrades. Verified
 //! requests reach the upstream with [`PLATFORM_HEADER`], [`KEY_THUMBPRINT_HEADER`] and
-//! [`REQUEST_BINDING_HEADER`]. [`PUBLIC_KEY_HEADER`] is included when configured. Copies sent by a
-//! client are removed, as are the signature headers.
+//! [`REQUEST_BINDING_HEADER`]; copies sent by a client are removed, as are the signature headers.
 
 use std::{
     sync::{
@@ -35,7 +34,7 @@ pub mod redis_replay;
 mod server;
 
 pub use crate::{
-    forward::{KEY_THUMBPRINT_HEADER, PLATFORM_HEADER, PUBLIC_KEY_HEADER, REQUEST_BINDING_HEADER},
+    forward::{KEY_THUMBPRINT_HEADER, PLATFORM_HEADER, REQUEST_BINDING_HEADER},
     server::{Proxy, serve_admin},
 };
 
@@ -54,8 +53,6 @@ pub struct ProxySettings {
     pub upstream_connect_timeout: Duration,
     /// Deadline for the upstream's response headers.
     pub upstream_response_timeout: Duration,
-    /// Whether verified device public JWKs are forwarded to the upstream.
-    pub forward_public_key: bool,
     /// Maximum concurrent client connections and WebSocket tunnels together.
     pub max_connections: usize,
     /// How long in-flight work may take to finish on shutdown.

@@ -49,7 +49,6 @@ async fn start_upstream(upstream: Upstream) -> SocketAddr {
         Json(json!({
             "platform": header("x-attested-platform"),
             "thumbprint": header("x-attested-key-thumbprint"),
-            "public_key": header("x-attested-public-key"),
             "binding": header("x-attested-request-binding"),
             "signature_headers": signature_headers,
             "body": body,
@@ -104,7 +103,6 @@ fn settings(upstream: SocketAddr) -> ProxySettings {
         header_read_timeout: Duration::from_secs(5),
         upstream_connect_timeout: Duration::from_millis(500),
         upstream_response_timeout: Duration::from_millis(500),
-        forward_public_key: false,
         max_connections: 64,
         shutdown_grace: Duration::from_secs(5),
     }
@@ -215,7 +213,6 @@ async fn signed_requests_reach_the_upstream_with_the_verified_identity() {
     let thumbprint = DeviceKey::new(client.signer.verifying_key()).thumbprint();
     assert_eq!(echoed["platform"], "ios");
     assert_eq!(echoed["thumbprint"], thumbprint);
-    assert_eq!(echoed["public_key"], Value::Null);
     assert_eq!(
         echoed["binding"].as_str().unwrap().len(),
         signed.request_binding.len()
@@ -237,7 +234,6 @@ async fn identity_headers_are_removed_on_unprotected_paths_too() {
         .post(format!("http://{}/v1/echo", proxy.addr))
         .header("x-attested-platform", "ios")
         .header("x-attested-key-thumbprint", "forged")
-        .header("x-attested-public-key", "forged")
         .send()
         .await
         .unwrap()
@@ -246,32 +242,6 @@ async fn identity_headers_are_removed_on_unprotected_paths_too() {
         .unwrap();
     assert_eq!(echoed["platform"], Value::Null);
     assert_eq!(echoed["thumbprint"], Value::Null);
-    assert_eq!(echoed["public_key"], Value::Null);
-}
-
-#[tokio::test]
-async fn public_key_is_forwarded_when_enabled() {
-    let client = TestClient::new(Platform::Ios, AUTHORITY);
-    let upstream_addr = start_upstream(Upstream::default()).await;
-    let proxy = start_proxy(
-        &client,
-        ProxySettings {
-            forward_public_key: true,
-            ..settings(upstream_addr)
-        },
-    )
-    .await;
-
-    let echoed: Value = send_signed(&client, &proxy, reqwest::Method::POST, "/v1/echo", "{}")
-        .header("x-attested-public-key", "forged")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let key = DeviceKey::new(client.signer.verifying_key()).jwk();
-    assert_eq!(echoed["public_key"], key);
 }
 
 #[tokio::test]

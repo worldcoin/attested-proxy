@@ -54,7 +54,6 @@ unreadable body all refuse the request.
 | --- | --- |
 | `x-attested-platform` | `ios` or `android` |
 | `x-attested-key-thumbprint` | RFC 7638 thumbprint of the device key: a stable per-device identifier, for example to rate limit on |
-| `x-attested-public-key` | Complete public JWK of the device key, only when `ATTESTED_PROXY_FORWARD_PUBLIC_KEY=true` |
 | `x-attested-request-binding` | `base64(SHA-256(signature base))` of this exact request |
 
 Client-sent copies of these headers are removed on every path, and the `Integrity-Token`,
@@ -84,7 +83,6 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_HEADER_READ_TIMEOUT_SECS` | `10` | Deadline for the request headers. |
 | `ATTESTED_PROXY_UPSTREAM_CONNECT_TIMEOUT_MS` | `2000` | Deadline for connecting upstream. |
 | `ATTESTED_PROXY_UPSTREAM_RESPONSE_TIMEOUT_SECS` | `60` | Deadline for upstream response headers. Open tunnels have none; the upstream owns their idle timeout. |
-| `ATTESTED_PROXY_FORWARD_PUBLIC_KEY` | `false` | Forward each verified device's complete public JWK as `x-attested-public-key`. |
 | `ATTESTED_PROXY_MAX_CONNECTIONS` | `1024` | Connections and tunnels together. Beyond it, connections wait in the listen backlog. |
 | `ATTESTED_PROXY_SHUTDOWN_GRACE_SECS` | `45` | How long in-flight work may finish after SIGTERM. |
 | `ATTESTED_PROXY_REPLAY_REDIS_URL` | none | Enables replay tracking (`redis://` or `rediss://`). |
