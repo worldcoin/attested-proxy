@@ -1,6 +1,6 @@
-//! Assembling the configured gateway and CI verification keys.
+//! Assembling configured issuer verification keys.
 
-use std::{fs::File, io::Read as _, sync::Arc};
+use std::{collections::HashSet, fs::File, io::Read as _, sync::Arc};
 
 use anyhow::{Context as _, ensure};
 use attested_request::{
@@ -8,97 +8,93 @@ use attested_request::{
     token::{IssuerKeys, StaticKeys, TokenVerifier, parse_jwks},
 };
 
-use crate::config::{AdditionalIssuers, Config};
+use crate::config::Config;
 
 pub(super) struct TrustedIssuers {
     pub tokens: TokenVerifier,
-    pub primary: RemoteJwks,
-    pub secondary: Option<RemoteJwks>,
+    pub health: IssuerHealth,
+}
+
+pub(super) struct IssuerHealth {
+    pub remote: Vec<(String, RemoteJwks)>,
+    has_static_keys: bool,
+}
+
+impl IssuerHealth {
+    pub(super) fn is_usable(&self) -> bool {
+        self.has_static_keys || self.remote.iter().any(|(_, jwks)| jwks.is_usable())
+    }
 }
 
 impl TrustedIssuers {
-    pub(super) fn new(config: &Config, additional: &AdditionalIssuers) -> anyhow::Result<Self> {
+    pub(super) fn new(config: &Config) -> anyhow::Result<Self> {
         ensure!(
-            !config.issuer.trim().is_empty(),
-            "primary issuer must not be blank"
+            !config.issuers.is_empty(),
+            "at least one issuer is required"
         );
-        ensure!(
-            config.jwks_url.scheme() == "https",
-            "JWKS URL must use HTTPS"
-        );
-        ensure!(
-            additional.secondary_issuer.is_some() == additional.secondary_jwks_url.is_some(),
-            "secondary issuer and JWKS URL must be configured together"
-        );
-        ensure!(
-            additional.ci_issuer.is_some() == additional.ci_jwks_file.is_some(),
-            "CI issuer and JWKS file must be configured together"
-        );
-        let mut names = vec![config.issuer.as_str()];
-        for issuer in [&additional.secondary_issuer, &additional.ci_issuer]
-            .into_iter()
-            .flatten()
-        {
+        let mut names = HashSet::new();
+        for issuer in &config.issuers {
             ensure!(
-                !issuer.trim().is_empty(),
-                "additional issuer must not be blank"
+                names.insert(&issuer.name),
+                "duplicate trusted issuer: {}",
+                issuer.name
             );
-            ensure!(
-                !names.contains(&issuer.as_str()),
-                "duplicate trusted issuer: {issuer}"
-            );
-            names.push(issuer);
         }
-        if let Some(url) = &additional.secondary_jwks_url {
-            ensure!(url.scheme() == "https", "secondary JWKS URL must use HTTPS");
-        }
-
         let client = crate::jwks_client()
             .build()
             .context("building the JWKS client")?;
-        let primary = RemoteJwks::new(
-            config.jwks_url.as_str(),
-            client.clone(),
-            RemoteJwksConfig::default(),
-        );
-        let mut issuers: Vec<(String, Arc<dyn IssuerKeys>)> =
-            vec![(config.issuer.clone(), Arc::new(primary.clone()))];
-        let secondary = if let (Some(issuer), Some(url)) =
-            (&additional.secondary_issuer, &additional.secondary_jwks_url)
-        {
-            let jwks = RemoteJwks::new(url.as_str(), client, RemoteJwksConfig::default());
-            issuers.push((issuer.clone(), Arc::new(jwks.clone())));
-            Some(jwks)
-        } else {
-            None
+        let mut issuers: Vec<(String, Arc<dyn IssuerKeys>)> = Vec::new();
+        let mut health = IssuerHealth {
+            remote: Vec::new(),
+            has_static_keys: false,
         };
-        if let (Some(issuer), Some(path)) = (&additional.ci_issuer, &additional.ci_jwks_file) {
-            let max_bytes = RemoteJwksConfig::default().max_document_bytes;
-            let mut document = Vec::new();
-            File::open(path)
-                .with_context(|| format!("opening CI JWKS file {}", path.display()))?
-                .take(u64::try_from(max_bytes)? + 1)
-                .read_to_end(&mut document)
-                .with_context(|| format!("reading CI JWKS file {}", path.display()))?;
-            ensure!(
-                document.len() <= max_bytes,
-                "CI JWKS exceeds {max_bytes} bytes"
-            );
-            let mut keys = parse_jwks(&document).context("parsing CI public JWKS")?;
-            keys.retain(|kid, _| !kid.is_empty());
-            ensure!(!keys.is_empty(), "CI JWKS contains no usable ES256 keys");
-            let keys = keys
-                .into_iter()
-                .fold(StaticKeys::default(), |keys, (kid, key)| {
-                    keys.with_key(kid, key)
-                });
-            issuers.push((issuer.clone(), Arc::new(keys)));
+        for issuer in &config.issuers {
+            if issuer.jwks_url.scheme() == "file" {
+                let path = issuer
+                    .jwks_url
+                    .to_file_path()
+                    .map_err(|()| anyhow::anyhow!("invalid local JWKS URL"))?;
+                let max_bytes = RemoteJwksConfig::default().max_document_bytes;
+                let mut document = Vec::new();
+                File::open(&path)
+                    .with_context(|| format!("opening JWKS file for issuer {}", issuer.name))?
+                    .take(u64::try_from(max_bytes)? + 1)
+                    .read_to_end(&mut document)
+                    .with_context(|| format!("reading JWKS file for issuer {}", issuer.name))?;
+                ensure!(
+                    document.len() <= max_bytes,
+                    "JWKS for issuer {} exceeds {max_bytes} bytes",
+                    issuer.name
+                );
+                let mut keys = parse_jwks(&document)
+                    .with_context(|| format!("parsing JWKS for issuer {}", issuer.name))?;
+                keys.retain(|kid, _| !kid.is_empty());
+                ensure!(
+                    !keys.is_empty(),
+                    "JWKS for issuer {} contains no usable ES256 keys",
+                    issuer.name
+                );
+                let keys = keys
+                    .into_iter()
+                    .fold(StaticKeys::default(), |keys, (kid, key)| {
+                        keys.with_key(kid, key)
+                    });
+                issuers.push((issuer.name.clone(), Arc::new(keys)));
+                health.has_static_keys = true;
+            } else {
+                let jwks = RemoteJwks::new(
+                    issuer.jwks_url.as_str(),
+                    client.clone(),
+                    RemoteJwksConfig::default(),
+                );
+                issuers.push((issuer.name.clone(), Arc::new(jwks.clone())));
+                health.remote.push((issuer.name.clone(), jwks));
+            }
         }
         Ok(Self {
             tokens: TokenVerifier::new(issuers, config.audiences.clone())
                 .context("configuring integrity token verification")?,
-            primary,
-            secondary,
+            health,
         })
     }
 }

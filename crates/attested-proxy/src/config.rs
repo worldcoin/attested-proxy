@@ -1,6 +1,6 @@
 //! Sidecar configuration, from flags or `ATTESTED_PROXY_*` environment variables.
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, str::FromStr, time::Duration};
 
 use clap::Parser;
 use http::Uri;
@@ -44,13 +44,14 @@ pub struct Config {
     )]
     pub audiences: Vec<String>,
 
-    /// The Attestation Gateway token issuer (`iss`).
-    #[arg(long, env = "ATTESTED_PROXY_ISSUER")]
-    pub issuer: String,
-
-    /// The Attestation Gateway HTTPS JWKS URL.
-    #[arg(long, env = "ATTESTED_PROXY_JWKS_URL")]
-    pub jwks_url: reqwest::Url,
+    /// Trusted issuers as comma-separated issuer=JWKS-URL pairs (https:// or file://).
+    #[arg(
+        long,
+        env = "ATTESTED_PROXY_ISSUERS",
+        value_delimiter = ',',
+        required = true
+    )]
+    pub issuers: Vec<Issuer>,
 
     /// Paths forwarded without verification, comma-separated and matched exactly. Use for the
     /// load balancer's health check, never for application routes.
@@ -124,32 +125,40 @@ pub struct Config {
     pub replay_timeout_ms: u64,
 }
 
-/// Optional trust sources, in addition to the primary gateway in [`Config`].
-#[derive(Debug, Clone, Default, clap::Args)]
-pub struct AdditionalIssuers {
-    /// An additional trusted gateway's token issuer (`iss`).
-    #[arg(
-        long,
-        env = "ATTESTED_PROXY_SECONDARY_ISSUER",
-        requires = "secondary_jwks_url"
-    )]
-    pub secondary_issuer: Option<String>,
+/// A trusted JWT issuer and its configured public-key source.
+#[derive(Debug, Clone)]
+pub struct Issuer {
+    pub(crate) name: String,
+    pub(crate) jwks_url: reqwest::Url,
+}
 
-    /// The secondary gateway's HTTPS JWKS URL.
-    #[arg(
-        long,
-        env = "ATTESTED_PROXY_SECONDARY_JWKS_URL",
-        requires = "secondary_issuer"
-    )]
-    pub secondary_jwks_url: Option<reqwest::Url>,
+impl FromStr for Issuer {
+    type Err = String;
 
-    /// The CI token issuer (`iss`).
-    #[arg(long, env = "ATTESTED_PROXY_CI_ISSUER", requires = "ci_jwks_file")]
-    pub ci_issuer: Option<String>,
-
-    /// Mounted public JWKS for CI tokens, loaded once at startup (not a private signing key).
-    #[arg(long, env = "ATTESTED_PROXY_CI_JWKS_FILE", requires = "ci_issuer")]
-    pub ci_jwks_file: Option<PathBuf>,
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (name, url) = value.split_once('=').ok_or("expected issuer=JWKS-URL")?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("issuer must not be blank".into());
+        }
+        let jwks_url = reqwest::Url::parse(url.trim()).map_err(|_| "invalid JWKS URL")?;
+        match jwks_url.scheme() {
+            "https" => {}
+            "file" => {
+                if jwks_url.to_file_path().is_err()
+                    || jwks_url.query().is_some()
+                    || jwks_url.fragment().is_some()
+                {
+                    return Err("expected a local file URL without a query or fragment".into());
+                }
+            }
+            _ => return Err("JWKS URL must use https:// or file://".into()),
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            jwks_url,
+        })
+    }
 }
 
 impl Config {

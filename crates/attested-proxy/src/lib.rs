@@ -61,33 +61,14 @@ pub struct ProxySettings {
 
 /// Runs the sidecar until SIGTERM or SIGINT.
 ///
-/// The admin listener reports ready once the Attestation Gateway JWKS is cached and stops
-/// reporting ready as soon as shutdown begins.
+/// Readiness requires at least one issuer with usable keys and stops on shutdown.
+/// Local public keys are loaded once at startup; rotate them by restarting the sidecar.
 ///
 /// # Errors
 ///
-/// Returns an error when configuration is invalid or either listener fails.
+/// Returns an error when configuration or local keys are invalid, or either listener fails.
 pub async fn run(config: config::Config) -> anyhow::Result<()> {
-    run_with_issuers(config, config::AdditionalIssuers::default()).await
-}
-
-/// Runs the sidecar with optional secondary gateway and CI verification keys.
-///
-/// Readiness depends on the primary gateway, so secondary outages do not interrupt primary
-/// traffic. CI public keys are loaded once at startup; rotate them by restarting the sidecar.
-///
-/// # Errors
-///
-/// Returns an error when configuration or CI keys are invalid, or either listener fails.
-pub async fn run_with_issuers(
-    config: config::Config,
-    additional: config::AdditionalIssuers,
-) -> anyhow::Result<()> {
-    let issuers::TrustedIssuers {
-        tokens,
-        primary: jwks,
-        secondary,
-    } = issuers::TrustedIssuers::new(&config, &additional)?;
+    let issuers::TrustedIssuers { tokens, health } = issuers::TrustedIssuers::new(&config)?;
     let mut verifier = Verifier::builder(tokens, &config.authority)
         .scheme(&config.scheme)
         .max_age(Duration::from_secs(config.max_age_secs))
@@ -101,21 +82,18 @@ pub async fn run_with_issuers(
             .context("configuring request verification")?,
     );
 
-    let _jwks_refresh = AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(
-        jwks.clone(),
-        "attested_proxy.jwks",
-    )));
-    let _secondary_refresh = secondary.map(|jwks| {
-        AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(
-            jwks,
-            "attested_proxy.secondary_jwks",
-        )))
-    });
+    let _jwks_refresh: Vec<_> = health
+        .remote
+        .iter()
+        .map(|(issuer, jwks)| {
+            AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(jwks.clone(), issuer.clone())))
+        })
+        .collect();
 
     let shutting_down = Arc::new(AtomicBool::new(false));
     let ready = {
         let shutting_down = Arc::clone(&shutting_down);
-        Arc::new(move || !shutting_down.load(Ordering::SeqCst) && jwks.is_usable())
+        Arc::new(move || !shutting_down.load(Ordering::SeqCst) && health.is_usable())
     };
     let admin_listener = TcpListener::bind(config.admin_listen)
         .await
@@ -184,20 +162,20 @@ fn jwks_client() -> reqwest::ClientBuilder {
 
 /// Fetches the JWKS until it succeeds, with capped exponential backoff and jitter, then keeps it
 /// refreshed. Reports the cache's health throughout, including before the first success.
-async fn keep_jwks_fresh(jwks: RemoteJwks, metric_prefix: &'static str) {
+async fn keep_jwks_fresh(jwks: RemoteJwks, issuer: String) {
     let _report = AbortOnDropHandle::new(tokio::spawn(report_jwks_health(
         jwks.clone(),
-        metric_prefix,
+        issuer.clone(),
     )));
     let mut delay = Duration::from_millis(500);
     while let Err(error) = jwks.refresh().await {
         let class = fetch_failure_class(&error);
-        metrics::counter!(format!("{metric_prefix}.fetch_failures"), "class" => class.clone())
+        metrics::counter!("attested_proxy.jwks.fetch_failures", "issuer" => issuer.clone(), "class" => class.clone())
             .increment(1);
         tracing::warn!(
             error = %error,
             class,
-            source = metric_prefix,
+            issuer = %issuer,
             retry_in_ms = delay.as_millis(),
             "initial JWKS fetch failed",
         );
@@ -207,13 +185,13 @@ async fn keep_jwks_fresh(jwks: RemoteJwks, metric_prefix: &'static str) {
     }
     // The refresh task logs its own failures; `age_seconds` shows when they persist.
     if let Err(error) = AbortOnDropHandle::new(jwks.spawn_refresh_task()).await {
-        tracing::error!(error = %error, "JWKS refresh task stopped");
+        tracing::error!(error = %error, issuer = %issuer, "JWKS refresh task stopped");
     }
 }
 
-async fn report_jwks_health(jwks: RemoteJwks, metric_prefix: &'static str) {
-    let age = metrics::gauge!(format!("{metric_prefix}.age_seconds"));
-    let usable = metrics::gauge!(format!("{metric_prefix}.usable"));
+async fn report_jwks_health(jwks: RemoteJwks, issuer: String) {
+    let age = metrics::gauge!("attested_proxy.jwks.age_seconds", "issuer" => issuer.clone());
+    let usable = metrics::gauge!("attested_proxy.jwks.usable", "issuer" => issuer);
     loop {
         if let Some(elapsed) = jwks.age() {
             age.set(elapsed.as_secs_f64());
