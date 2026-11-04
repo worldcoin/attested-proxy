@@ -18,9 +18,8 @@ use std::{
 use anyhow::Context as _;
 use attested_request::{
     Verifier,
-    remote_jwks::{JwksFetchError, RemoteJwks, RemoteJwksConfig},
+    remote_jwks::{JwksFetchError, RemoteJwks},
     replay::ReplayGuard,
-    token::TokenVerifier,
 };
 use http::Uri;
 use rand::Rng as _;
@@ -29,6 +28,7 @@ use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 
 pub mod config;
 mod forward;
+mod issuers;
 #[cfg(feature = "redis")]
 pub mod redis_replay;
 mod server;
@@ -68,20 +68,26 @@ pub struct ProxySettings {
 ///
 /// Returns an error when configuration is invalid or either listener fails.
 pub async fn run(config: config::Config) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        config.jwks_url.scheme() == "https",
-        "JWKS URL must use HTTPS"
-    );
-    let jwks = RemoteJwks::new(
-        config.jwks_url.as_str(),
-        jwks_client().build().context("building the JWKS client")?,
-        RemoteJwksConfig::default(),
-    );
-    let tokens = TokenVerifier::new(
-        [(config.issuer.clone(), Arc::new(jwks.clone()) as _)],
-        config.audiences.clone(),
-    )
-    .context("configuring integrity token verification")?;
+    run_with_issuers(config, config::AdditionalIssuers::default()).await
+}
+
+/// Runs the sidecar with optional secondary gateway and CI verification keys.
+///
+/// Readiness depends on the primary gateway, so secondary outages do not interrupt primary
+/// traffic. CI public keys are loaded once at startup; rotate them by restarting the sidecar.
+///
+/// # Errors
+///
+/// Returns an error when configuration or CI keys are invalid, or either listener fails.
+pub async fn run_with_issuers(
+    config: config::Config,
+    additional: config::AdditionalIssuers,
+) -> anyhow::Result<()> {
+    let issuers::TrustedIssuers {
+        tokens,
+        primary: jwks,
+        secondary,
+    } = issuers::TrustedIssuers::new(&config, &additional)?;
     let mut verifier = Verifier::builder(tokens, &config.authority)
         .scheme(&config.scheme)
         .max_age(Duration::from_secs(config.max_age_secs))
@@ -95,7 +101,16 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
             .context("configuring request verification")?,
     );
 
-    let _jwks_refresh = AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(jwks.clone())));
+    let _jwks_refresh = AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(
+        jwks.clone(),
+        "attested_proxy.jwks",
+    )));
+    let _secondary_refresh = secondary.map(|jwks| {
+        AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(
+            jwks,
+            "attested_proxy.secondary_jwks",
+        )))
+    });
 
     let shutting_down = Arc::new(AtomicBool::new(false));
     let ready = {
@@ -169,16 +184,20 @@ fn jwks_client() -> reqwest::ClientBuilder {
 
 /// Fetches the JWKS until it succeeds, with capped exponential backoff and jitter, then keeps it
 /// refreshed. Reports the cache's health throughout, including before the first success.
-async fn keep_jwks_fresh(jwks: RemoteJwks) {
-    let _report = AbortOnDropHandle::new(tokio::spawn(report_jwks_health(jwks.clone())));
+async fn keep_jwks_fresh(jwks: RemoteJwks, metric_prefix: &'static str) {
+    let _report = AbortOnDropHandle::new(tokio::spawn(report_jwks_health(
+        jwks.clone(),
+        metric_prefix,
+    )));
     let mut delay = Duration::from_millis(500);
     while let Err(error) = jwks.refresh().await {
         let class = fetch_failure_class(&error);
-        metrics::counter!("attested_proxy.jwks.fetch_failures", "class" => class.clone())
+        metrics::counter!(format!("{metric_prefix}.fetch_failures"), "class" => class.clone())
             .increment(1);
         tracing::warn!(
             error = %error,
             class,
+            source = metric_prefix,
             retry_in_ms = delay.as_millis(),
             "initial JWKS fetch failed",
         );
@@ -192,9 +211,9 @@ async fn keep_jwks_fresh(jwks: RemoteJwks) {
     }
 }
 
-async fn report_jwks_health(jwks: RemoteJwks) {
-    let age = metrics::gauge!("attested_proxy.jwks.age_seconds");
-    let usable = metrics::gauge!("attested_proxy.jwks.usable");
+async fn report_jwks_health(jwks: RemoteJwks, metric_prefix: &'static str) {
+    let age = metrics::gauge!(format!("{metric_prefix}.age_seconds"));
+    let usable = metrics::gauge!(format!("{metric_prefix}.usable"));
     loop {
         if let Some(elapsed) = jwks.age() {
             age.set(elapsed.as_secs_f64());

@@ -1,6 +1,6 @@
 //! Sidecar configuration, from flags or `ATTESTED_PROXY_*` environment variables.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use clap::Parser;
 use http::Uri;
@@ -122,6 +122,34 @@ pub struct Config {
     /// Deadline for one replay-store command, in milliseconds.
     #[arg(long, env = "ATTESTED_PROXY_REPLAY_TIMEOUT_MS", default_value_t = 250)]
     pub replay_timeout_ms: u64,
+}
+
+/// Optional trust sources, in addition to the primary gateway in [`Config`].
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct AdditionalIssuers {
+    /// An additional trusted gateway's token issuer (`iss`).
+    #[arg(
+        long,
+        env = "ATTESTED_PROXY_SECONDARY_ISSUER",
+        requires = "secondary_jwks_url"
+    )]
+    pub secondary_issuer: Option<String>,
+
+    /// The secondary gateway's HTTPS JWKS URL.
+    #[arg(
+        long,
+        env = "ATTESTED_PROXY_SECONDARY_JWKS_URL",
+        requires = "secondary_issuer"
+    )]
+    pub secondary_jwks_url: Option<reqwest::Url>,
+
+    /// The CI token issuer (`iss`).
+    #[arg(long, env = "ATTESTED_PROXY_CI_ISSUER", requires = "ci_jwks_file")]
+    pub ci_issuer: Option<String>,
+
+    /// Mounted public JWKS for CI tokens, loaded once at startup (not a private signing key).
+    #[arg(long, env = "ATTESTED_PROXY_CI_JWKS_FILE", requires = "ci_issuer")]
+    pub ci_jwks_file: Option<PathBuf>,
 }
 
 impl Config {

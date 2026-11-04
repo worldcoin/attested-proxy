@@ -73,6 +73,10 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_AUDIENCES` | required | Accepted token audiences, comma-separated. |
 | `ATTESTED_PROXY_ISSUER` | required | The Attestation Gateway `iss`. |
 | `ATTESTED_PROXY_JWKS_URL` | required | The Attestation Gateway HTTPS JWKS URL. |
+| `ATTESTED_PROXY_SECONDARY_ISSUER` | none | Optional second trusted issuer; requires `SECONDARY_JWKS_URL`. |
+| `ATTESTED_PROXY_SECONDARY_JWKS_URL` | none | Secondary issuer's HTTPS JWKS URL; requires `SECONDARY_ISSUER`. |
+| `ATTESTED_PROXY_CI_ISSUER` | none | Optional CI token issuer; requires `CI_JWKS_FILE`. |
+| `ATTESTED_PROXY_CI_JWKS_FILE` | none | Mounted public JWKS file for CI tokens; requires `CI_ISSUER`. |
 | `ATTESTED_PROXY_UNPROTECTED_PATHS` | none | Exact paths forwarded without verification. |
 | `ATTESTED_PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener. |
 | `ATTESTED_PROXY_ADMIN_LISTEN` | `0.0.0.0:8081` | `/health` (liveness) and `/ready` (readiness). |
@@ -87,6 +91,16 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_SHUTDOWN_GRACE_SECS` | `45` | How long in-flight work may finish after SIGTERM. |
 | `ATTESTED_PROXY_REPLAY_REDIS_URL` | none | Enables replay tracking (`redis://` or `rediss://`). |
 | `ATTESTED_PROXY_REPLAY_TIMEOUT_MS` | `250` | Deadline for one replay-store command. |
+
+Each optional issuer is disabled when both settings are absent. Partial pairs, blank settings
+and duplicate issuer identifiers fail startup. All issuers use the configured audiences and the
+same ES256 token and request-signature checks; CI requests still need the device private key
+matching the token's `cnf.jwk`.
+
+The CI JWKS is loaded once at startup, must be at most 64 KiB and must contain usable ES256
+public keys. Keep the token-signing private key on the CI client; mount only its public JWKS in
+the proxy. To rotate keys, publish overlapping old and new `kid`s, roll the proxy pods, switch
+the CI signer, then remove the old key and roll again after old tokens expire.
 
 Telemetry is configured by `telemetry-batteries` (`TELEMETRY_PRESET=datadog`,
 `TELEMETRY_SERVICE_NAME`, `TELEMETRY_METRICS_BACKEND=statsd`, …), as in Flamingo.
@@ -121,9 +135,30 @@ sidecars:
     readinessProbe: { httpGet: { path: /ready, port: 8081 } }
 ```
 
+For CI, add these environment variables and a read-only volume mount to the sidecar, and the
+volume to the pod spec (or the chart's equivalent fields):
+
+```yaml
+# Sidecar fields:
+env:
+  - { name: ATTESTED_PROXY_CI_ISSUER, value: <CI issuer> }
+  - { name: ATTESTED_PROXY_CI_JWKS_FILE, value: /etc/attested-proxy/ci/jwks.json }
+volumeMounts:
+  - { name: ci-jwks, mountPath: /etc/attested-proxy/ci, readOnly: true }
+# Pod field:
+volumes:
+  - name: ci-jwks
+    secret:
+      secretName: attested-proxy-ci-public-jwks
+```
+
+The Secret's `jwks.json` entry contains public keys only.
+
 The pod is ready only when both containers are: the service's own probe as before, and the
-sidecar's once it holds a usable JWKS. The sidecar stops reporting ready as soon as it receives
-SIGTERM, then drains.
+sidecar's once it holds a usable primary JWKS. The secondary JWKS refreshes independently;
+an unavailable secondary key source returns 503 for affected requests without changing
+readiness or preventing primary requests. The sidecar stops reporting ready as soon as it
+receives SIGTERM, then drains.
 
 ### Health, metrics and logs
 
@@ -138,6 +173,7 @@ SIGTERM, then drains.
 | `attested_proxy.jwks.age_seconds` | Age of the cached JWKS; alert well before it reaches six hours, when verification starts failing. |
 | `attested_proxy.jwks.usable` | `1` while the cached JWKS can verify tokens, `0` before the first fetch and once it is too stale. Alert on `0`: `age_seconds` reports nothing until a fetch succeeds. |
 | `attested_proxy.jwks.fetch_failures` | Failed startup JWKS fetches, by `class` (the HTTP status code, `timeout`, `request`, `invalid`, ...). |
+| `attested_proxy.secondary_jwks.age_seconds`, `.usable`, `.fetch_failures` | The same JWKS metrics for the optional secondary issuer; existing `attested_proxy.jwks.*` metrics continue to describe the primary issuer. |
 
 Client rejections are counted, not logged. Failures of our own dependencies (JWKS, replay store,
 upstream) are logged at `warn`. Tokens, signatures and bodies are never logged.
