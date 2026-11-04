@@ -170,17 +170,16 @@ async fn keep_jwks_fresh(jwks: RemoteJwks, issuer: String) {
     let mut delay = Duration::from_millis(500);
     while let Err(error) = jwks.refresh().await {
         let class = fetch_failure_class(&error);
-        metrics::counter!("attested_proxy.jwks.fetch_failures", "issuer" => issuer.clone(), "class" => class.clone())
-            .increment(1);
+        let jitter = rand::thread_rng().gen_range(0.5..1.0);
+        let retry_delay = delay.mul_f64(jitter);
         tracing::warn!(
             error = %error,
             class,
             issuer = %issuer,
-            retry_in_ms = delay.as_millis(),
+            retry_in_ms = retry_delay.as_millis(),
             "initial JWKS fetch failed",
         );
-        let jitter = rand::thread_rng().gen_range(0.5..1.0);
-        tokio::time::sleep(delay.mul_f64(jitter)).await;
+        tokio::time::sleep(retry_delay).await;
         delay = (delay * 2).min(Duration::from_secs(30));
     }
     // The refresh task logs its own failures; `age_seconds` shows when they persist.

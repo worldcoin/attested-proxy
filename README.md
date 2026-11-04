@@ -175,10 +175,13 @@ SIGTERM, then drains.
 | `attested_proxy.connections.active` | Open client connections. |
 | `attested_proxy.jwks.age_seconds` | Age of the cached JWKS; alert well before it reaches six hours, when verification starts failing. |
 | `attested_proxy.jwks.usable` | `1` while the cached JWKS can verify tokens, `0` before the first fetch and once it is too stale. Alert on `0`: `age_seconds` reports nothing until a fetch succeeds. |
-| `attested_proxy.jwks.fetch_failures` | Failed startup JWKS fetches, by `class` (the HTTP status code, `timeout`, `request`, `invalid`, ...). |
+| `attested_proxy.jwks.fetch_failures` | Failed JWKS fetches across startup, periodic and request-triggered refreshes (once per shared fetch), by `class` (the HTTP status code, `timeout`, `request`, `invalid`, ...). |
 
 The `attested_proxy.jwks.*` metrics describe HTTPS sources and carry an `issuer` label containing
 the configured issuer identifier. Local sources do not fetch or refresh.
+
+One INFO event at startup reports the accepted issuer count, HTTPS/file source counts and loaded
+file-key count. It confirms configuration loading; remote keys may not have been fetched yet.
 
 Client rejections are counted, not logged. Failures of our own dependencies (JWKS, replay store,
 upstream) are logged at `warn`. Tokens, signatures and bodies are never logged.

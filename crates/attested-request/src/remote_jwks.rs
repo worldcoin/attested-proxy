@@ -78,6 +78,7 @@ struct Inner {
     client: reqwest::Client,
     config: RemoteJwksConfig,
     cache: ArcSwapOption<Snapshot>,
+    on_fetch_failure: Arc<dyn Fn(&JwksFetchError) + Send + Sync>,
     /// Owned by the fetch task so cancelling a caller cannot cancel the shared refresh.
     last_attempt: Arc<Mutex<Option<RefreshAttempt>>>,
 }
@@ -105,12 +106,26 @@ impl RemoteJwks {
     /// A JWKS at `url`. Nothing is fetched until [`RemoteJwks::refresh`] or the first lookup.
     #[must_use]
     pub fn new(url: impl Into<String>, client: reqwest::Client, config: RemoteJwksConfig) -> Self {
+        Self::new_with_failure_observer(url, client, config, |_| {})
+    }
+
+    /// A cached JWKS with an observer called once per failed fetch, including background and
+    /// request-triggered refreshes. Shared or cached failures do not notify again.
+    /// The observer runs synchronously in the fetch task and should be fast and non-panicking.
+    #[must_use]
+    pub fn new_with_failure_observer(
+        url: impl Into<String>,
+        client: reqwest::Client,
+        config: RemoteJwksConfig,
+        observer: impl Fn(&JwksFetchError) + Send + Sync + 'static,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 url: url.into(),
                 client,
                 config,
                 cache: ArcSwapOption::empty(),
+                on_fetch_failure: Arc::new(observer),
                 last_attempt: Arc::new(Mutex::new(None)),
             }),
         }
@@ -176,6 +191,9 @@ impl RemoteJwks {
         let jwks = self.clone();
         tokio::spawn(async move {
             let result = jwks.fetch().await;
+            if let Err(error) = &result {
+                (jwks.inner.on_fetch_failure)(error);
+            }
             *last_attempt = Some(RefreshAttempt {
                 finished_at: Instant::now(),
                 result: result.clone(),

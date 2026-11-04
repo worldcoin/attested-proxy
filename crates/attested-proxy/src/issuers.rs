@@ -48,6 +48,7 @@ impl TrustedIssuers {
             remote: Vec::new(),
             has_static_keys: false,
         };
+        let mut loaded_file_key_count = 0;
         for issuer in &config.issuers {
             if issuer.jwks_url.scheme() == "file" {
                 let path = issuer
@@ -74,6 +75,7 @@ impl TrustedIssuers {
                     "JWKS for issuer {} contains no usable ES256 keys",
                     issuer.name
                 );
+                loaded_file_key_count += keys.len();
                 let keys = keys
                     .into_iter()
                     .fold(StaticKeys::default(), |keys, (kid, key)| {
@@ -82,20 +84,31 @@ impl TrustedIssuers {
                 issuers.push((issuer.name.clone(), Arc::new(keys)));
                 health.has_static_keys = true;
             } else {
-                let jwks = RemoteJwks::new(
+                let name = issuer.name.clone();
+                let jwks = RemoteJwks::new_with_failure_observer(
                     issuer.jwks_url.as_str(),
                     client.clone(),
                     RemoteJwksConfig::default(),
+                    move |error| {
+                        metrics::counter!("attested_proxy.jwks.fetch_failures",
+                            "issuer" => name.clone(), "class" => crate::fetch_failure_class(error))
+                        .increment(1);
+                    },
                 );
                 issuers.push((issuer.name.clone(), Arc::new(jwks.clone())));
                 health.remote.push((issuer.name.clone(), jwks));
             }
         }
-        Ok(Self {
-            tokens: TokenVerifier::new(issuers, config.audiences.clone())
-                .context("configuring integrity token verification")?,
-            health,
-        })
+        let tokens = TokenVerifier::new(issuers, config.audiences.clone())
+            .context("configuring integrity token verification")?;
+        tracing::info!(
+            issuer_count = config.issuers.len(),
+            https_issuer_count = health.remote.len(),
+            file_issuer_count = config.issuers.len() - health.remote.len(),
+            loaded_file_key_count,
+            "trust configuration loaded",
+        );
+        Ok(Self { tokens, health })
     }
 }
 

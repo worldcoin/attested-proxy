@@ -1,6 +1,12 @@
 //! The remote JWKS cache.
 
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use attested_request::{
     remote_jwks::{JwksFetchError, RemoteJwks, RemoteJwksConfig},
@@ -298,4 +304,113 @@ async fn a_refresh_survives_cancellation_of_its_caller() {
     assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
     assert!(jwks.is_usable());
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+fn observed_jwks_at(
+    server: &MockServer,
+    config: RemoteJwksConfig,
+) -> (RemoteJwks, Arc<AtomicUsize>) {
+    let failures = Arc::new(AtomicUsize::new(0));
+    let observed = failures.clone();
+    let jwks = RemoteJwks::new_with_failure_observer(
+        format!("{}/.well-known/jwks.json", server.uri()),
+        reqwest::Client::new(),
+        config,
+        move |_| {
+            observed.fetch_add(1, Ordering::SeqCst);
+        },
+    );
+    (jwks, failures)
+}
+
+#[tokio::test]
+async fn shared_refresh_failure_is_observed_once_after_a_successful_fetch() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        ResponseTemplate::new(200).set_body_json(issuer.jwks()),
+    )
+    .await;
+    let (jwks, failures) = observed_jwks_at(&server, config());
+    jwks.refresh().await.unwrap();
+    assert_eq!(failures.load(Ordering::SeqCst), 0);
+
+    serve(
+        &server,
+        ResponseTemplate::new(503).set_delay(Duration::from_millis(100)),
+    )
+    .await;
+    let (first, second, third) = tokio::join!(jwks.refresh(), jwks.refresh(), jwks.refresh());
+    for result in [first, second, third] {
+        assert!(matches!(result, Err(JwksFetchError::Status(status)) if status == 503));
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+    // Cached keys and the remembered failure do not generate additional observations.
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert!(jwks.key("unknown").await.is_err());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn request_triggered_failure_is_observed_but_successful_unknown_kid_is_not() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        ResponseTemplate::new(200).set_body_json(issuer.jwks()),
+    )
+    .await;
+    let (jwks, failures) = observed_jwks_at(
+        &server,
+        RemoteJwksConfig {
+            min_refresh_interval: Duration::ZERO,
+            ..config()
+        },
+    );
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert!(jwks.key("unknown").await.unwrap().is_none());
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(failures.load(Ordering::SeqCst), 0);
+
+    serve(&server, ResponseTemplate::new(503)).await;
+    assert!(jwks.key("unknown").await.is_err());
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn periodic_refresh_failure_is_observed() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        ResponseTemplate::new(200).set_body_json(issuer.jwks()),
+    )
+    .await;
+    let (jwks, failures) = observed_jwks_at(
+        &server,
+        RemoteJwksConfig {
+            refresh_interval: Duration::from_millis(200),
+            ..config()
+        },
+    );
+    jwks.refresh().await.unwrap();
+    serve(&server, ResponseTemplate::new(503)).await;
+    let refresh = jwks.spawn_refresh_task();
+    let observed = tokio::time::timeout(Duration::from_secs(2), async {
+        while failures.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    refresh.abort();
+    assert!(refresh.await.unwrap_err().is_cancelled());
+    observed.unwrap();
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+    assert!(jwks.is_usable());
 }
