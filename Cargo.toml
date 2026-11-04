@@ -27,6 +27,7 @@ arc-swap = "1.7"
 axum = { version = "0.8", default-features = false }
 base64 = "0.22"
 bytes = "1"
+cadence = "1.8"
 ciborium = "0.2"
 clap = { version = "4", features = ["derive", "env"] }
 futures-util = "0.3"
@@ -38,6 +39,7 @@ http-body-util = "0.1"
 hyper = "1"
 hyper-util = "0.1"
 metrics = "0.24"
+metrics-exporter-statsd = "0.9"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 rand = "0.8"
 redis = { version = "1", default-features = false }
