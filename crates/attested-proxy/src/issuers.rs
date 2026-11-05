@@ -4,8 +4,10 @@ use std::{collections::HashSet, fs::File, io::Read as _, path::Path, sync::Arc};
 
 use anyhow::{Context as _, ensure};
 use attested_request::{
-    remote_jwks::{RemoteJwks, RemoteJwksConfig},
-    token::{IssuerKeys, StaticKeys, TokenVerifier, parse_jwks},
+    remote_jwks::{
+        HttpJwksFetcher, JwksFetchError, JwksKeys, RemoteJwks, RemoteJwksConfig, RemoteJwksFetcher,
+    },
+    token::{BoxFuture, IssuerKeys, StaticKeys, TokenVerifier, parse_jwks},
 };
 
 use crate::config::{Config, JwksSource};
@@ -106,17 +108,37 @@ fn load_file_keys(issuer: &str, path: &Path) -> anyhow::Result<(StaticKeys, usiz
 }
 
 fn remote_keys(issuer: &str, url: &reqwest::Url, client: reqwest::Client) -> RemoteJwks {
-    let name = issuer.to_owned();
-    RemoteJwks::new_with_failure_observer(
+    RemoteJwks::with_fetcher(
         url.as_str(),
-        client,
-        RemoteJwksConfig::default(),
-        move |error| {
-            metrics::counter!("attested_proxy.jwks.fetch_failures",
-                "issuer" => name.clone(), "class" => crate::fetch_failure_class(error))
-            .increment(1);
+        ObservedFetcher {
+            inner: HttpJwksFetcher::new(client),
+            issuer: issuer.to_owned(),
         },
+        RemoteJwksConfig::default(),
     )
+}
+
+struct ObservedFetcher<F> {
+    inner: F,
+    issuer: String,
+}
+
+impl<F: RemoteJwksFetcher> RemoteJwksFetcher for ObservedFetcher<F> {
+    fn fetch<'a>(
+        &'a self,
+        url: &'a str,
+        config: RemoteJwksConfig,
+    ) -> BoxFuture<'a, Result<JwksKeys, JwksFetchError>> {
+        Box::pin(async move {
+            let result = self.inner.fetch(url, config).await;
+            if let Err(error) = &result {
+                metrics::counter!("attested_proxy.jwks.fetch_failures",
+                    "issuer" => self.issuer.clone(), "class" => crate::fetch_failure_class(error))
+                .increment(1);
+            }
+            result
+        })
+    }
 }
 
 #[cfg(test)]
@@ -355,5 +377,113 @@ mod tests {
         document.resize(64 * 1024, b' ');
         let file = JwksFile::new(&document);
         assert!(TrustedIssuers::new(&config(&file.issuer("ci"))).is_ok());
+    }
+
+    struct StubFetcher(Result<JwksKeys, JwksFetchError>);
+
+    impl RemoteJwksFetcher for StubFetcher {
+        fn fetch<'a>(
+            &'a self,
+            _url: &'a str,
+            _config: RemoteJwksConfig,
+        ) -> BoxFuture<'a, Result<JwksKeys, JwksFetchError>> {
+            Box::pin(async { self.0.clone() })
+        }
+    }
+
+    struct FailureRecorder {
+        expected: metrics::Key,
+        count: Arc<metrics::atomics::AtomicU64>,
+    }
+
+    impl metrics::Recorder for FailureRecorder {
+        fn describe_counter(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+        fn describe_gauge(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+        fn describe_histogram(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+
+        fn register_counter(
+            &self,
+            key: &metrics::Key,
+            _: &metrics::Metadata<'_>,
+        ) -> metrics::Counter {
+            assert_eq!(key, &self.expected);
+            metrics::Counter::from_arc(self.count.clone())
+        }
+
+        fn register_gauge(&self, _: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
+            metrics::Gauge::noop()
+        }
+
+        fn register_histogram(
+            &self,
+            _: &metrics::Key,
+            _: &metrics::Metadata<'_>,
+        ) -> metrics::Histogram {
+            metrics::Histogram::noop()
+        }
+    }
+
+    #[tokio::test]
+    async fn observed_fetcher_preserves_results_and_counts_only_failures_with_issuer_and_class() {
+        let client = TestClient::new(Platform::Android, "app.example");
+        let keys = parse_jwks(&serde_json::to_vec(&client.issuer.jwks()).unwrap()).unwrap();
+        for (result, class) in [
+            (Ok(keys), None),
+            (
+                Err(JwksFetchError::Status(
+                    reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                )),
+                Some("503"),
+            ),
+            (Err(JwksFetchError::Empty), Some("empty")),
+        ] {
+            let recorder = FailureRecorder {
+                expected: metrics::Key::from_parts(
+                    "attested_proxy.jwks.fetch_failures",
+                    vec![
+                        metrics::Label::new("issuer", "primary"),
+                        metrics::Label::new("class", class.unwrap_or("unused")),
+                    ],
+                ),
+                count: Arc::new(metrics::atomics::AtomicU64::new(0)),
+            };
+            let fetcher = ObservedFetcher {
+                inner: StubFetcher(result.clone()),
+                issuer: "primary".into(),
+            };
+            let _recorder = metrics::set_default_local_recorder(&recorder);
+            let actual = fetcher
+                .fetch("https://issuer.invalid/jwks", RemoteJwksConfig::default())
+                .await;
+            match (actual, result) {
+                (Ok(actual), Ok(expected)) => assert_eq!(actual, expected),
+                (Err(actual), Err(expected)) => {
+                    assert_eq!(actual.to_string(), expected.to_string());
+                }
+                _ => panic!("fetch result changed"),
+            }
+            assert_eq!(
+                recorder.count.load(std::sync::atomic::Ordering::Acquire),
+                u64::from(class.is_some())
+            );
+        }
     }
 }

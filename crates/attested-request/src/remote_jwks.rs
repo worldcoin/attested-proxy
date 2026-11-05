@@ -67,6 +67,66 @@ pub enum JwksFetchError {
     Task(#[from] Arc<tokio::task::JoinError>),
 }
 
+/// Usable ES256 verification keys indexed by key ID.
+pub type JwksKeys = HashMap<String, VerifyingKey>;
+
+/// Fetches and validates a remote JWKS. Implementations must return nonempty usable keys
+/// or a fetch error, and enforce the configured timeout and document-size limit.
+pub trait RemoteJwksFetcher: Send + Sync {
+    /// Fetches keys from `url` without caching them.
+    fn fetch<'a>(
+        &'a self,
+        url: &'a str,
+        config: RemoteJwksConfig,
+    ) -> BoxFuture<'a, Result<JwksKeys, JwksFetchError>>;
+}
+
+/// Fetches and validates JWKS documents using an HTTP client.
+pub struct HttpJwksFetcher {
+    client: reqwest::Client,
+}
+
+impl HttpJwksFetcher {
+    /// Uses `client` for remote JWKS requests.
+    #[must_use]
+    pub fn new(client: reqwest::Client) -> Self {
+        Self { client }
+    }
+}
+
+impl RemoteJwksFetcher for HttpJwksFetcher {
+    fn fetch<'a>(
+        &'a self,
+        url: &'a str,
+        config: RemoteJwksConfig,
+    ) -> BoxFuture<'a, Result<JwksKeys, JwksFetchError>> {
+        Box::pin(async move {
+            let mut response = self
+                .client
+                .get(url)
+                .timeout(config.fetch_timeout)
+                .send()
+                .await
+                .map_err(Arc::new)?;
+            if !response.status().is_success() {
+                return Err(JwksFetchError::Status(response.status()));
+            }
+            let mut document = Vec::new();
+            while let Some(chunk) = response.chunk().await.map_err(Arc::new)? {
+                if document.len() + chunk.len() > config.max_document_bytes {
+                    return Err(JwksFetchError::TooLarge);
+                }
+                document.extend_from_slice(&chunk);
+            }
+            let keys = parse_jwks(&document).map_err(Arc::new)?;
+            if keys.is_empty() {
+                return Err(JwksFetchError::Empty);
+            }
+            Ok(keys)
+        })
+    }
+}
+
 /// A remote JWKS with a local cache. Cheap to clone; clones share the cache.
 #[derive(Clone)]
 pub struct RemoteJwks {
@@ -75,16 +135,15 @@ pub struct RemoteJwks {
 
 struct Inner {
     url: String,
-    client: reqwest::Client,
+    fetcher: Arc<dyn RemoteJwksFetcher>,
     config: RemoteJwksConfig,
     cache: ArcSwapOption<Snapshot>,
-    on_fetch_failure: Arc<dyn Fn(&JwksFetchError) + Send + Sync>,
     /// Owned by the fetch task so cancelling a caller cannot cancel the shared refresh.
     last_attempt: Arc<Mutex<Option<RefreshAttempt>>>,
 }
 
 struct Snapshot {
-    keys: HashMap<String, VerifyingKey>,
+    keys: JwksKeys,
     fetched_at: Instant,
 }
 
@@ -106,26 +165,23 @@ impl RemoteJwks {
     /// A JWKS at `url`. Nothing is fetched until [`RemoteJwks::refresh`] or the first lookup.
     #[must_use]
     pub fn new(url: impl Into<String>, client: reqwest::Client, config: RemoteJwksConfig) -> Self {
-        Self::new_with_failure_observer(url, client, config, |_| {})
+        Self::with_fetcher(url, HttpJwksFetcher::new(client), config)
     }
 
-    /// A cached JWKS with an observer called once per failed fetch, including background and
-    /// request-triggered refreshes. Shared or cached failures do not notify again.
-    /// The observer runs synchronously in the fetch task and should be fast and non-panicking.
+    /// Uses an injected fetcher for all refreshes, including background and key lookups.
+    /// Concurrent callers share a fetch; cancelling a caller does not cancel it.
     #[must_use]
-    pub fn new_with_failure_observer(
+    pub fn with_fetcher(
         url: impl Into<String>,
-        client: reqwest::Client,
+        fetcher: impl RemoteJwksFetcher + 'static,
         config: RemoteJwksConfig,
-        observer: impl Fn(&JwksFetchError) + Send + Sync + 'static,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 url: url.into(),
-                client,
+                fetcher: Arc::new(fetcher),
                 config,
                 cache: ArcSwapOption::empty(),
-                on_fetch_failure: Arc::new(observer),
                 last_attempt: Arc::new(Mutex::new(None)),
             }),
         }
@@ -191,9 +247,6 @@ impl RemoteJwks {
         let jwks = self.clone();
         tokio::spawn(async move {
             let result = jwks.fetch().await;
-            if let Err(error) = &result {
-                (jwks.inner.on_fetch_failure)(error);
-            }
             *last_attempt = Some(RefreshAttempt {
                 finished_at: Instant::now(),
                 result: result.clone(),
@@ -206,26 +259,11 @@ impl RemoteJwks {
 
     /// Fetches a bounded document and publishes usable keys atomically.
     async fn fetch(&self) -> Result<(), JwksFetchError> {
-        let config = &self.inner.config;
-        let mut response = self
+        let keys = self
             .inner
-            .client
-            .get(&self.inner.url)
-            .timeout(config.fetch_timeout)
-            .send()
-            .await
-            .map_err(Arc::new)?;
-        if !response.status().is_success() {
-            return Err(JwksFetchError::Status(response.status()));
-        }
-        let mut document = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(Arc::new)? {
-            if document.len() + chunk.len() > config.max_document_bytes {
-                return Err(JwksFetchError::TooLarge);
-            }
-            document.extend_from_slice(&chunk);
-        }
-        let keys = parse_jwks(&document).map_err(Arc::new)?;
+            .fetcher
+            .fetch(&self.inner.url, self.inner.config)
+            .await?;
         if keys.is_empty() {
             return Err(JwksFetchError::Empty);
         }
