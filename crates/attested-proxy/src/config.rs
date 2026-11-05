@@ -1,6 +1,6 @@
 //! Sidecar configuration, from flags or `ATTESTED_PROXY_*` environment variables.
 
-use std::{net::SocketAddr, str::FromStr, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, str::FromStr, time::Duration};
 
 use clap::Parser;
 use http::Uri;
@@ -129,7 +129,13 @@ pub struct Config {
 #[derive(Debug, Clone)]
 pub struct Issuer {
     pub(crate) name: String,
-    pub(crate) jwks_url: reqwest::Url,
+    pub(crate) source: JwksSource,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum JwksSource {
+    Http(reqwest::Url),
+    File(PathBuf),
 }
 
 impl FromStr for Issuer {
@@ -142,21 +148,22 @@ impl FromStr for Issuer {
             return Err("issuer must not be blank".into());
         }
         let jwks_url = reqwest::Url::parse(url.trim()).map_err(|_| "invalid JWKS URL")?;
-        match jwks_url.scheme() {
-            "https" => {}
+        let source = match jwks_url.scheme() {
+            "https" => JwksSource::Http(jwks_url),
             "file" => {
-                if jwks_url.to_file_path().is_err()
-                    || jwks_url.query().is_some()
-                    || jwks_url.fragment().is_some()
-                {
+                let path = jwks_url
+                    .to_file_path()
+                    .map_err(|()| "expected a local file URL without a query or fragment")?;
+                if jwks_url.query().is_some() || jwks_url.fragment().is_some() {
                     return Err("expected a local file URL without a query or fragment".into());
                 }
+                JwksSource::File(path)
             }
             _ => return Err("JWKS URL must use https:// or file://".into()),
-        }
+        };
         Ok(Self {
             name: name.to_owned(),
-            jwks_url,
+            source,
         })
     }
 }
