@@ -1,11 +1,19 @@
 //! The remote JWKS cache.
 
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use attested_request::{
-    remote_jwks::{JwksFetchError, RemoteJwks, RemoteJwksConfig},
+    remote_jwks::{
+        HttpJwksFetcher, JwksFetchError, JwksKeys, RemoteJwks, RemoteJwksConfig, RemoteJwksFetcher,
+    },
     test_util::TestIssuer,
-    token::IssuerKeys,
+    token::{BoxFuture, IssuerKeys},
 };
 use serde_json::json;
 use wiremock::{
@@ -298,4 +306,183 @@ async fn a_refresh_survives_cancellation_of_its_caller() {
     assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
     assert!(jwks.is_usable());
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+struct CountingFetcher {
+    inner: HttpJwksFetcher,
+    failures: Arc<AtomicUsize>,
+}
+
+impl RemoteJwksFetcher for CountingFetcher {
+    fn fetch<'a>(
+        &'a self,
+        url: &'a str,
+        config: RemoteJwksConfig,
+    ) -> BoxFuture<'a, Result<JwksKeys, JwksFetchError>> {
+        Box::pin(async move {
+            let result = self.inner.fetch(url, config).await;
+            if result.is_err() {
+                self.failures.fetch_add(1, Ordering::SeqCst);
+            }
+            result
+        })
+    }
+}
+
+fn observed_jwks_at(
+    server: &MockServer,
+    config: RemoteJwksConfig,
+) -> (RemoteJwks, Arc<AtomicUsize>) {
+    let failures = Arc::new(AtomicUsize::new(0));
+    let jwks = RemoteJwks::with_fetcher(
+        format!("{}/.well-known/jwks.json", server.uri()),
+        CountingFetcher {
+            inner: HttpJwksFetcher::new(reqwest::Client::new()),
+            failures: failures.clone(),
+        },
+        config,
+    );
+    (jwks, failures)
+}
+
+#[tokio::test]
+async fn shared_refresh_failure_is_observed_once_after_a_successful_fetch() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        ResponseTemplate::new(200).set_body_json(issuer.jwks()),
+    )
+    .await;
+    let (jwks, failures) = observed_jwks_at(&server, config());
+    jwks.refresh().await.unwrap();
+    assert_eq!(failures.load(Ordering::SeqCst), 0);
+
+    serve(
+        &server,
+        ResponseTemplate::new(503).set_delay(Duration::from_millis(100)),
+    )
+    .await;
+    let (first, second, third) = tokio::join!(jwks.refresh(), jwks.refresh(), jwks.refresh());
+    for result in [first, second, third] {
+        assert!(matches!(result, Err(JwksFetchError::Status(status)) if status == 503));
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+    // Cached keys and the remembered failure do not generate additional observations.
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert!(jwks.key("unknown").await.is_err());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn request_triggered_failure_is_observed_but_successful_unknown_kid_is_not() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        ResponseTemplate::new(200).set_body_json(issuer.jwks()),
+    )
+    .await;
+    let (jwks, failures) = observed_jwks_at(
+        &server,
+        RemoteJwksConfig {
+            min_refresh_interval: Duration::ZERO,
+            ..config()
+        },
+    );
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert!(jwks.key("unknown").await.unwrap().is_none());
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(failures.load(Ordering::SeqCst), 0);
+
+    serve(&server, ResponseTemplate::new(503)).await;
+    assert!(jwks.key("unknown").await.is_err());
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn periodic_refresh_failure_is_observed() {
+    let issuer = TestIssuer::new("https://attestation.example");
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        ResponseTemplate::new(200).set_body_json(issuer.jwks()),
+    )
+    .await;
+    let (jwks, failures) = observed_jwks_at(
+        &server,
+        RemoteJwksConfig {
+            refresh_interval: Duration::from_millis(200),
+            ..config()
+        },
+    );
+    jwks.refresh().await.unwrap();
+    serve(&server, ResponseTemplate::new(503)).await;
+    let refresh = jwks.spawn_refresh_task();
+    let observed = tokio::time::timeout(Duration::from_secs(2), async {
+        while failures.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    refresh.abort();
+    assert!(refresh.await.unwrap_err().is_cancelled());
+    observed.unwrap();
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+    assert!(jwks.is_usable());
+}
+
+struct StubFetcher {
+    response: Arc<std::sync::Mutex<Result<JwksKeys, JwksFetchError>>>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl RemoteJwksFetcher for StubFetcher {
+    fn fetch<'a>(
+        &'a self,
+        _url: &'a str,
+        _config: RemoteJwksConfig,
+    ) -> BoxFuture<'a, Result<JwksKeys, JwksFetchError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let response = self.response.lock().unwrap().clone();
+        Box::pin(async move { response })
+    }
+}
+
+#[tokio::test]
+async fn an_injected_fetcher_populates_the_cache_and_empty_results_do_not_replace_it() {
+    let response = Arc::new(std::sync::Mutex::new(Ok(JwksKeys::new())));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let jwks = RemoteJwks::with_fetcher(
+        "https://issuer.invalid/jwks",
+        StubFetcher {
+            response: response.clone(),
+            calls: calls.clone(),
+        },
+        config(),
+    );
+    assert!(matches!(jwks.refresh().await, Err(JwksFetchError::Empty)));
+    assert!(!jwks.is_usable());
+    assert!(jwks.age().is_none());
+
+    let issuer = TestIssuer::new("https://attestation.example");
+    let keys =
+        attested_request::token::parse_jwks(&serde_json::to_vec(&issuer.jwks()).unwrap()).unwrap();
+    *response.lock().unwrap() = Ok(keys);
+    jwks.refresh().await.unwrap();
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let age = jwks.age().unwrap();
+    *response.lock().unwrap() = Ok(JwksKeys::new());
+    assert!(matches!(jwks.refresh().await, Err(JwksFetchError::Empty)));
+    assert!(jwks.age().unwrap() >= age);
+    assert!(jwks.key(&issuer.kid).await.unwrap().is_some());
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }

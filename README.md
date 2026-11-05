@@ -71,8 +71,7 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_AUTHORITY` | required | The host clients dial, as signed in `@authority`. |
 | `ATTESTED_PROXY_SCHEME` | `https` | As signed in `@scheme`. `wss://` clients sign `https`. |
 | `ATTESTED_PROXY_AUDIENCES` | required | Accepted token audiences, comma-separated. |
-| `ATTESTED_PROXY_ISSUER` | required | The Attestation Gateway `iss`. |
-| `ATTESTED_PROXY_JWKS_URL` | required | The Attestation Gateway HTTPS JWKS URL. |
+| `ATTESTED_PROXY_ISSUERS` | required | Comma-separated `issuer=https://...` or `issuer=file:///...` JWKS sources. |
 | `ATTESTED_PROXY_UNPROTECTED_PATHS` | none | Exact paths forwarded without verification. |
 | `ATTESTED_PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener. |
 | `ATTESTED_PROXY_ADMIN_LISTEN` | `0.0.0.0:8081` | `/health` (liveness) and `/ready` (readiness). |
@@ -87,6 +86,25 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_SHUTDOWN_GRACE_SECS` | `45` | How long in-flight work may finish after SIGTERM. |
 | `ATTESTED_PROXY_REPLAY_REDIS_URL` | none | Enables replay tracking (`redis://` or `rediss://`). |
 | `ATTESTED_PROXY_REPLAY_TIMEOUT_MS` | `250` | Deadline for one replay-store command. |
+
+For example:
+
+```sh
+ATTESTED_PROXY_ISSUERS='attestation.worldcoin.dev=https://attestation.worldcoin.dev/.well-known/jwks.json,ci.attestation.worldcoin.dev=file:///etc/attested-proxy/ci/jwks.json'
+```
+
+The issuer is matched exactly against the token's `iss`. Invalid or empty entries, duplicate
+issuers, unsupported URL schemes and unreadable or invalid local files fail startup. File URLs
+must be local, with no query or fragment; percent-encoded paths are decoded. Encode commas
+inside URLs as `%2C`. This setting replaces the previous issuer and JWKS environment variables.
+All issuers use the configured audiences and the same ES256 token and request-signature checks;
+CI requests still need the device private key matching the token's `cnf.jwk`.
+
+HTTPS sources refresh independently. Local public JWKS files are loaded once at startup, must
+be at most 64 KiB and must contain usable ES256 keys. Keep token-signing private keys on the
+client; mount only public JWKS in the proxy. To rotate local keys, publish overlapping old and
+new `kid`s, roll the proxy pods, switch the signer, then remove the old key and roll again after
+old tokens expire.
 
 Telemetry is configured by `telemetry-batteries` (`TELEMETRY_PRESET=datadog`,
 `TELEMETRY_SERVICE_NAME`, `TELEMETRY_METRICS_BACKEND=statsd`, …), as in Flamingo.
@@ -112,8 +130,7 @@ sidecars:
       - { name: ATTESTED_PROXY_UPSTREAM, value: "http://127.0.0.1:8000" }
       - { name: ATTESTED_PROXY_AUTHORITY, value: flamingo-verifier.toolsforhumanity.com }
       - { name: ATTESTED_PROXY_AUDIENCES, value: <flamingo audience> }
-      - { name: ATTESTED_PROXY_ISSUER, value: <attestation gateway issuer> }
-      - { name: ATTESTED_PROXY_JWKS_URL, value: <attestation gateway>/.well-known/jwks.json }
+      - { name: ATTESTED_PROXY_ISSUERS, value: "attestation.worldcoin.dev=https://attestation.worldcoin.dev/.well-known/jwks.json" }
       - { name: ATTESTED_PROXY_UNPROTECTED_PATHS, value: "/health,/ready" }
     ports:
       - { name: proxy, containerPort: 8080 }
@@ -121,8 +138,29 @@ sidecars:
     readinessProbe: { httpGet: { path: /ready, port: 8081 } }
 ```
 
+For CI, extend the issuer list and add a read-only volume mount to the sidecar, and the
+volume to the pod spec (or the chart's equivalent fields):
+
+```yaml
+# Sidecar fields:
+env:
+  - name: ATTESTED_PROXY_ISSUERS
+    value: "attestation.worldcoin.dev=https://attestation.worldcoin.dev/.well-known/jwks.json,ci.attestation.worldcoin.dev=file:///etc/attested-proxy/ci/jwks.json"
+volumeMounts:
+  - { name: ci-jwks, mountPath: /etc/attested-proxy/ci, readOnly: true }
+# Pod field:
+volumes:
+  - name: ci-jwks
+    secret:
+      secretName: attested-proxy-ci-public-jwks
+```
+
+The Secret's `jwks.json` entry contains public keys only.
+
 The pod is ready only when both containers are: the service's own probe as before, and the
-sidecar's once it holds a usable JWKS. The sidecar stops reporting ready as soon as it receives
+sidecar's once any configured key source is usable. A successfully loaded local JWKS remains
+usable until restart. An unavailable remote source returns 503 for affected requests; other
+issuers can continue serving traffic. The sidecar stops reporting ready as soon as it receives
 SIGTERM, then drains.
 
 ### Health, metrics and logs
@@ -137,7 +175,13 @@ SIGTERM, then drains.
 | `attested_proxy.connections.active` | Open client connections. |
 | `attested_proxy.jwks.age_seconds` | Age of the cached JWKS; alert well before it reaches six hours, when verification starts failing. |
 | `attested_proxy.jwks.usable` | `1` while the cached JWKS can verify tokens, `0` before the first fetch and once it is too stale. Alert on `0`: `age_seconds` reports nothing until a fetch succeeds. |
-| `attested_proxy.jwks.fetch_failures` | Failed startup JWKS fetches, by `class` (the HTTP status code, `timeout`, `request`, `invalid`, ...). |
+| `attested_proxy.jwks.fetch_failures` | Failed JWKS fetches across startup, periodic and request-triggered refreshes (once per shared fetch), by `class` (the HTTP status code, `timeout`, `request`, `invalid`, ...). |
+
+The `attested_proxy.jwks.*` metrics describe HTTPS sources and carry an `issuer` label containing
+the configured issuer identifier. Local sources do not fetch or refresh.
+
+One INFO event at startup reports the accepted issuer count, HTTPS/file source counts and loaded
+file-key count. It confirms configuration loading; remote keys may not have been fetched yet.
 
 Client rejections are counted, not logged. Failures of our own dependencies (JWKS, replay store,
 upstream) are logged at `warn`. Tokens, signatures and bodies are never logged.

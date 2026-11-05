@@ -10,7 +10,14 @@ use std::{
 };
 
 use attested_proxy::{Proxy, ProxySettings};
-use attested_request::{Platform, device::DeviceKey, test_util::TestClient};
+use attested_request::{
+    Platform, Verifier,
+    device::DeviceKey,
+    remote_jwks::{RemoteJwks, RemoteJwksConfig},
+    test_util::{TestClient, TestIssuer},
+    token::TokenVerifier,
+    verify::FixedClock,
+};
 use attested_request_tower::BodyLimits;
 use axum::{
     Json, Router,
@@ -109,7 +116,11 @@ fn settings(upstream: SocketAddr) -> ProxySettings {
 }
 
 async fn start_proxy(client: &TestClient, settings: ProxySettings) -> Running {
-    let verifier = Arc::new(client.verifier().build().unwrap());
+    start_proxy_with_verifier(client.verifier().build().unwrap(), settings).await
+}
+
+async fn start_proxy_with_verifier(verifier: Verifier, settings: ProxySettings) -> Running {
+    let verifier = Arc::new(verifier);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (stop, stopped) = oneshot::channel::<()>();
@@ -220,6 +231,153 @@ async fn signed_requests_reach_the_upstream_with_the_verified_identity() {
     assert_eq!(echoed["signature_headers"], false);
     assert_eq!(echoed["body"], r#"{"hello":"world"}"#);
     assert_eq!(upstream.hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn trusted_issuers_keep_their_keys_separate() {
+    let primary = TestClient::new(Platform::Ios, AUTHORITY);
+    let secondary = TestClient {
+        issuer: TestIssuer::new("https://secondary.example"),
+        ..primary.clone()
+    };
+    let ci = TestClient {
+        issuer: TestIssuer::new("https://ci.example"),
+        ..primary.clone()
+    };
+    let upstream = Upstream::default();
+    let upstream_addr = start_upstream(upstream.clone()).await;
+
+    // Each issuer uses the same kid, but its own signing key.
+    assert_eq!(primary.issuer.kid, secondary.issuer.kid);
+    assert_eq!(primary.issuer.kid, ci.issuer.kid);
+    let clients = [&primary, &secondary, &ci];
+    for trusted_count in [3, 2] {
+        let trusted = &clients[..trusted_count];
+        let tokens = TokenVerifier::new(
+            trusted.iter().map(|client| {
+                (
+                    client.issuer.issuer.clone(),
+                    Arc::new(client.issuer.keys()) as _,
+                )
+            }),
+            [primary.audience.clone()],
+        )
+        .unwrap();
+        let verifier = Verifier::builder(tokens, AUTHORITY)
+            .clock(Arc::new(FixedClock(primary.now)))
+            .build()
+            .unwrap();
+        let proxy = start_proxy_with_verifier(verifier, settings(upstream_addr)).await;
+        let before = upstream.hits.load(Ordering::SeqCst);
+        for (index, client) in clients.iter().enumerate() {
+            let response = send_signed(client, &proxy, reqwest::Method::POST, "/v1/echo", "{}")
+                .send()
+                .await
+                .unwrap();
+            let expected = if index < trusted_count { 200 } else { 401 };
+            assert_eq!(
+                response.status(),
+                expected,
+                "issuer {}",
+                client.issuer.issuer
+            );
+        }
+
+        for (signer, claimed_issuer) in [
+            (&primary, &secondary),
+            (&secondary, &primary),
+            (&ci, &primary),
+        ] {
+            let mut forged = signer.clone();
+            forged
+                .issuer
+                .issuer
+                .clone_from(&claimed_issuer.issuer.issuer);
+            let response = send_signed(&forged, &proxy, reqwest::Method::POST, "/v1/echo", "{}")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 401);
+        }
+        assert_eq!(upstream.hits.load(Ordering::SeqCst) - before, trusted.len());
+        proxy.stop.send(()).unwrap();
+        proxy.served.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn an_unavailable_issuer_does_not_block_other_issuers() {
+    let primary = TestClient::new(Platform::Ios, AUTHORITY);
+    let secondary = TestClient {
+        issuer: TestIssuer::new("https://secondary.example"),
+        ..primary.clone()
+    };
+    let ci = TestClient {
+        issuer: TestIssuer::new("https://ci.example"),
+        ..primary.clone()
+    };
+    let jwks_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let jwks_addr = jwks_listener.local_addr().unwrap();
+    let jwks_server = tokio::spawn(async move {
+        let app = Router::new().route(
+            "/jwks",
+            get(|| async { http::StatusCode::SERVICE_UNAVAILABLE }),
+        );
+        axum::serve(jwks_listener, app).await.unwrap();
+    });
+    let secondary_keys = RemoteJwks::new(
+        format!("http://{jwks_addr}/jwks"),
+        reqwest::Client::new(),
+        RemoteJwksConfig {
+            fetch_timeout: Duration::from_millis(500),
+            ..RemoteJwksConfig::default()
+        },
+    );
+    let tokens = TokenVerifier::new(
+        [
+            (
+                primary.issuer.issuer.clone(),
+                Arc::new(primary.issuer.keys()) as _,
+            ),
+            (
+                secondary.issuer.issuer.clone(),
+                Arc::new(secondary_keys) as _,
+            ),
+            (ci.issuer.issuer.clone(), Arc::new(ci.issuer.keys()) as _),
+        ],
+        [primary.audience.clone()],
+    )
+    .unwrap();
+    let verifier = Verifier::builder(tokens, AUTHORITY)
+        .clock(Arc::new(FixedClock(primary.now)))
+        .build()
+        .unwrap();
+    let upstream = Upstream::default();
+    let upstream_addr = start_upstream(upstream.clone()).await;
+    let proxy = start_proxy_with_verifier(verifier, settings(upstream_addr)).await;
+
+    for (client, expected) in [(&secondary, 503), (&primary, 200), (&ci, 200)] {
+        let response = send_signed(client, &proxy, reqwest::Method::POST, "/v1/echo", "{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            expected,
+            "issuer {}",
+            client.issuer.issuer
+        );
+    }
+    let tampered = send_signed(&ci, &proxy, reqwest::Method::POST, "/v1/echo", "{}")
+        .body("tampered")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tampered.status(), 403);
+    assert_eq!(upstream.hits.load(Ordering::SeqCst), 2);
+    proxy.stop.send(()).unwrap();
+    proxy.served.await.unwrap().unwrap();
+    jwks_server.abort();
 }
 
 #[tokio::test]

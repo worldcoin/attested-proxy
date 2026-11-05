@@ -1,6 +1,6 @@
 //! Sidecar configuration, from flags or `ATTESTED_PROXY_*` environment variables.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, str::FromStr, time::Duration};
 
 use clap::Parser;
 use http::Uri;
@@ -44,13 +44,14 @@ pub struct Config {
     )]
     pub audiences: Vec<String>,
 
-    /// The Attestation Gateway token issuer (`iss`).
-    #[arg(long, env = "ATTESTED_PROXY_ISSUER")]
-    pub issuer: String,
-
-    /// The Attestation Gateway HTTPS JWKS URL.
-    #[arg(long, env = "ATTESTED_PROXY_JWKS_URL")]
-    pub jwks_url: reqwest::Url,
+    /// Trusted issuers as comma-separated issuer=JWKS-URL pairs (https:// or file://).
+    #[arg(
+        long,
+        env = "ATTESTED_PROXY_ISSUERS",
+        value_delimiter = ',',
+        required = true
+    )]
+    pub issuers: Vec<Issuer>,
 
     /// Paths forwarded without verification, comma-separated and matched exactly. Use for the
     /// load balancer's health check, never for application routes.
@@ -122,6 +123,49 @@ pub struct Config {
     /// Deadline for one replay-store command, in milliseconds.
     #[arg(long, env = "ATTESTED_PROXY_REPLAY_TIMEOUT_MS", default_value_t = 250)]
     pub replay_timeout_ms: u64,
+}
+
+/// A trusted JWT issuer and its configured public-key source.
+#[derive(Debug, Clone)]
+pub struct Issuer {
+    pub(crate) name: String,
+    pub(crate) source: JwksSource,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum JwksSource {
+    Http(reqwest::Url),
+    File(PathBuf),
+}
+
+impl FromStr for Issuer {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (name, url) = value.split_once('=').ok_or("expected issuer=JWKS-URL")?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("issuer must not be blank".into());
+        }
+        let jwks_url = reqwest::Url::parse(url.trim()).map_err(|_| "invalid JWKS URL")?;
+        let source = match jwks_url.scheme() {
+            "https" => JwksSource::Http(jwks_url),
+            "file" => {
+                let path = jwks_url
+                    .to_file_path()
+                    .map_err(|()| "expected a local file URL without a query or fragment")?;
+                if jwks_url.query().is_some() || jwks_url.fragment().is_some() {
+                    return Err("expected a local file URL without a query or fragment".into());
+                }
+                JwksSource::File(path)
+            }
+            _ => return Err("JWKS URL must use https:// or file://".into()),
+        };
+        Ok(Self {
+            name: name.to_owned(),
+            source,
+        })
+    }
 }
 
 impl Config {

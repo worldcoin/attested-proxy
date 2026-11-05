@@ -18,9 +18,8 @@ use std::{
 use anyhow::Context as _;
 use attested_request::{
     Verifier,
-    remote_jwks::{JwksFetchError, RemoteJwks, RemoteJwksConfig},
+    remote_jwks::{JwksFetchError, RemoteJwks},
     replay::ReplayGuard,
-    token::TokenVerifier,
 };
 use http::Uri;
 use rand::Rng as _;
@@ -29,6 +28,7 @@ use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 
 pub mod config;
 mod forward;
+mod issuers;
 #[cfg(feature = "redis")]
 pub mod redis_replay;
 mod server;
@@ -61,27 +61,14 @@ pub struct ProxySettings {
 
 /// Runs the sidecar until SIGTERM or SIGINT.
 ///
-/// The admin listener reports ready once the Attestation Gateway JWKS is cached and stops
-/// reporting ready as soon as shutdown begins.
+/// Readiness requires at least one issuer with usable keys and stops on shutdown.
+/// Local public keys are loaded once at startup; rotate them by restarting the sidecar.
 ///
 /// # Errors
 ///
-/// Returns an error when configuration is invalid or either listener fails.
+/// Returns an error when configuration or local keys are invalid, or either listener fails.
 pub async fn run(config: config::Config) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        config.jwks_url.scheme() == "https",
-        "JWKS URL must use HTTPS"
-    );
-    let jwks = RemoteJwks::new(
-        config.jwks_url.as_str(),
-        jwks_client().build().context("building the JWKS client")?,
-        RemoteJwksConfig::default(),
-    );
-    let tokens = TokenVerifier::new(
-        [(config.issuer.clone(), Arc::new(jwks.clone()) as _)],
-        config.audiences.clone(),
-    )
-    .context("configuring integrity token verification")?;
+    let issuers::TrustedIssuers { tokens, health } = issuers::TrustedIssuers::new(&config)?;
     let mut verifier = Verifier::builder(tokens, &config.authority)
         .scheme(&config.scheme)
         .max_age(Duration::from_secs(config.max_age_secs))
@@ -95,12 +82,18 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
             .context("configuring request verification")?,
     );
 
-    let _jwks_refresh = AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(jwks.clone())));
+    let _jwks_refresh: Vec<_> = health
+        .remote
+        .iter()
+        .map(|(issuer, jwks)| {
+            AbortOnDropHandle::new(tokio::spawn(keep_jwks_fresh(jwks.clone(), issuer.clone())))
+        })
+        .collect();
 
     let shutting_down = Arc::new(AtomicBool::new(false));
     let ready = {
         let shutting_down = Arc::clone(&shutting_down);
-        Arc::new(move || !shutting_down.load(Ordering::SeqCst) && jwks.is_usable())
+        Arc::new(move || !shutting_down.load(Ordering::SeqCst) && health.is_usable())
     };
     let admin_listener = TcpListener::bind(config.admin_listen)
         .await
@@ -169,32 +162,35 @@ fn jwks_client() -> reqwest::ClientBuilder {
 
 /// Fetches the JWKS until it succeeds, with capped exponential backoff and jitter, then keeps it
 /// refreshed. Reports the cache's health throughout, including before the first success.
-async fn keep_jwks_fresh(jwks: RemoteJwks) {
-    let _report = AbortOnDropHandle::new(tokio::spawn(report_jwks_health(jwks.clone())));
+async fn keep_jwks_fresh(jwks: RemoteJwks, issuer: String) {
+    let _report = AbortOnDropHandle::new(tokio::spawn(report_jwks_health(
+        jwks.clone(),
+        issuer.clone(),
+    )));
     let mut delay = Duration::from_millis(500);
     while let Err(error) = jwks.refresh().await {
         let class = fetch_failure_class(&error);
-        metrics::counter!("attested_proxy.jwks.fetch_failures", "class" => class.clone())
-            .increment(1);
+        let jitter = rand::thread_rng().gen_range(0.5..1.0);
+        let retry_delay = delay.mul_f64(jitter);
         tracing::warn!(
             error = %error,
             class,
-            retry_in_ms = delay.as_millis(),
+            issuer = %issuer,
+            retry_in_ms = retry_delay.as_millis(),
             "initial JWKS fetch failed",
         );
-        let jitter = rand::thread_rng().gen_range(0.5..1.0);
-        tokio::time::sleep(delay.mul_f64(jitter)).await;
+        tokio::time::sleep(retry_delay).await;
         delay = (delay * 2).min(Duration::from_secs(30));
     }
     // The refresh task logs its own failures; `age_seconds` shows when they persist.
     if let Err(error) = AbortOnDropHandle::new(jwks.spawn_refresh_task()).await {
-        tracing::error!(error = %error, "JWKS refresh task stopped");
+        tracing::error!(error = %error, issuer = %issuer, "JWKS refresh task stopped");
     }
 }
 
-async fn report_jwks_health(jwks: RemoteJwks) {
-    let age = metrics::gauge!("attested_proxy.jwks.age_seconds");
-    let usable = metrics::gauge!("attested_proxy.jwks.usable");
+async fn report_jwks_health(jwks: RemoteJwks, issuer: String) {
+    let age = metrics::gauge!("attested_proxy.jwks.age_seconds", "issuer" => issuer.clone());
+    let usable = metrics::gauge!("attested_proxy.jwks.usable", "issuer" => issuer);
     loop {
         if let Some(elapsed) = jwks.age() {
             age.set(elapsed.as_secs_f64());
