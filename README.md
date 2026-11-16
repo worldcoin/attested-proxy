@@ -40,9 +40,12 @@ The sidecar is the service's **only ingress**. For each request it:
 
 1. forwards it unverified if its path is listed in `ATTESTED_PROXY_UNPROTECTED_PATHS` (exact
    match, meant for the load balancer's health check);
-2. otherwise reads the body under a size limit and deadline, and verifies the request, answering
+2. forwards it unverified if its path is listed in `ATTESTED_PROXY_OPTIONAL_PATHS` (exact match)
+   and it carries none of the `Integrity-Token`, `Signature-Input` and `Signature` headers, unless
+   it is a WebSocket upgrade;
+3. otherwise reads the body under a size limit and deadline, and verifies the request, answering
    `{"error": "<reason>"}` with the reason's status when verification fails;
-3. forwards the verified request to the one configured upstream. Clients never choose the
+4. forwards the verified request to the one configured upstream. Clients never choose the
    destination. WebSocket upgrades are verified on the handshake and then tunnelled byte for byte.
 
 Everything that can fail does so closed: an unreachable JWKS, an unreachable replay store and an
@@ -61,6 +64,12 @@ Client-sent copies of these headers are removed on every path, and the `Integrit
 only because it is reachable solely through the sidecar, so keep its port off the Service and the
 load balancer.
 
+On an optional path the headers are present only when the request was verified. A request with
+some but not all of the signature headers, or with a signature that does not verify, is refused
+rather than forwarded unverified. The upstream must authenticate every request that arrives
+without these headers, and bound its body: unverified requests bypass
+`ATTESTED_PROXY_MAX_BODY_BYTES`. Never list a path as optional before the upstream enforces that.
+
 ### Configuration
 
 Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --help` lists them.
@@ -73,6 +82,7 @@ Every flag has an `ATTESTED_PROXY_*` environment variable; `attested-proxy --hel
 | `ATTESTED_PROXY_AUDIENCES` | required | Accepted token audiences, comma-separated. |
 | `ATTESTED_PROXY_ISSUERS` | required | Comma-separated `issuer=https://...` or `issuer=file:///...` JWKS sources. |
 | `ATTESTED_PROXY_UNPROTECTED_PATHS` | none | Exact paths forwarded without verification. |
+| `ATTESTED_PROXY_OPTIONAL_PATHS` | none | Exact paths where unsigned requests are forwarded unverified for the upstream to authenticate. A path cannot also be unprotected. |
 | `ATTESTED_PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener. |
 | `ATTESTED_PROXY_ADMIN_LISTEN` | `0.0.0.0:8081` | `/health` (liveness) and `/ready` (readiness). |
 | `ATTESTED_PROXY_MAX_AGE_SECS` | `300` | Oldest accepted `created`. |

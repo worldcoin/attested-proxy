@@ -44,7 +44,7 @@ const IDENTITY_HEADERS: [&str; 3] = [
     KEY_THUMBPRINT_HEADER,
     REQUEST_BINDING_HEADER,
 ];
-const SIGNATURE_HEADERS: [&str; 3] = [
+pub(crate) const SIGNATURE_HEADERS: [&str; 3] = [
     INTEGRITY_TOKEN_HEADER,
     SIGNATURE_INPUT_HEADER,
     SIGNATURE_HEADER,
@@ -228,7 +228,7 @@ async fn tunnel(
 
 /// The `Upgrade` value when this is a WebSocket upgrade: `Connection: upgrade` and
 /// `Upgrade: websocket`.
-fn websocket_upgrade(headers: &HeaderMap) -> Option<HeaderValue> {
+pub(crate) fn websocket_upgrade(headers: &HeaderMap) -> Option<HeaderValue> {
     let connection_upgrade = headers.get_all(CONNECTION).iter().any(|value| {
         value.to_str().is_ok_and(|value| {
             value

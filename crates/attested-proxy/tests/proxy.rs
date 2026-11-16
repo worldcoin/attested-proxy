@@ -106,6 +106,7 @@ fn settings(upstream: SocketAddr) -> ProxySettings {
     ProxySettings {
         upstream: format!("http://{upstream}").parse().unwrap(),
         unprotected_paths: vec!["/health".to_owned()],
+        optional_paths: Vec::new(),
         body_limits: BodyLimits::default(),
         header_read_timeout: Duration::from_secs(5),
         upstream_connect_timeout: Duration::from_millis(500),
@@ -400,6 +401,115 @@ async fn identity_headers_are_removed_on_unprotected_paths_too() {
         .unwrap();
     assert_eq!(echoed["platform"], Value::Null);
     assert_eq!(echoed["thumbprint"], Value::Null);
+}
+
+async fn setup_with_optional_paths(paths: &[&str]) -> (TestClient, Upstream, Running) {
+    let client = TestClient::new(Platform::Ios, AUTHORITY);
+    let upstream = Upstream::default();
+    let upstream_addr = start_upstream(upstream.clone()).await;
+    let mut settings = settings(upstream_addr);
+    settings.optional_paths = paths.iter().map(|path| (*path).to_owned()).collect();
+    let proxy = start_proxy(&client, settings).await;
+    (client, upstream, proxy)
+}
+
+#[tokio::test]
+async fn unsigned_requests_on_optional_paths_arrive_without_an_identity() {
+    let (_, upstream, proxy) = setup_with_optional_paths(&["/v1/echo"]).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/echo", proxy.addr))
+        .header("x-attested-platform", "ios")
+        .header("x-attested-key-thumbprint", "forged")
+        .header("x-attested-request-binding", "forged")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let echoed: Value = response.json().await.unwrap();
+    assert_eq!(echoed["platform"], Value::Null);
+    assert_eq!(echoed["thumbprint"], Value::Null);
+    assert_eq!(echoed["binding"], Value::Null);
+    assert_eq!(echoed["body"], "{}");
+    assert_eq!(upstream.hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn signed_requests_on_optional_paths_are_verified() {
+    let (client, upstream, proxy) = setup_with_optional_paths(&["/v1/echo"]).await;
+    let echoed: Value = send_signed(&client, &proxy, reqwest::Method::POST, "/v1/echo", "{}")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(echoed["platform"], "ios");
+    assert_eq!(
+        echoed["thumbprint"],
+        DeviceKey::new(client.signer.verifying_key()).thumbprint()
+    );
+    assert_eq!(upstream.hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_failed_signature_on_an_optional_path_is_not_forwarded_unverified() {
+    let (client, upstream, proxy) = setup_with_optional_paths(&["/v1/echo"]).await;
+    let signed = client.sign("POST", "/v1/echo", b"signed body");
+    let mut request = reqwest::Client::new()
+        .post(format!("http://{}/v1/echo", proxy.addr))
+        .body("another body");
+    for (name, value) in signed.headers() {
+        request = request.header(name, value);
+    }
+    let response = request.send().await.unwrap();
+    assert!(response.status().is_client_error(), "{}", response.status());
+    assert_eq!(upstream.hits.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn partially_signed_requests_on_optional_paths_are_refused() {
+    let (_, upstream, proxy) = setup_with_optional_paths(&["/v1/echo"]).await;
+    for header in ["integrity-token", "signature-input", "signature"] {
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/v1/echo", proxy.addr))
+            .header(header, "anything")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 401, "{header}");
+        assert_eq!(
+            response.json::<Value>().await.unwrap(),
+            json!({"error": "headers_missing"}),
+            "{header}"
+        );
+    }
+    assert_eq!(upstream.hits.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn optional_paths_match_exactly() {
+    let (_, upstream, proxy) = setup_with_optional_paths(&["/v1/echo/nested"]).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/echo", proxy.addr))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401);
+    assert_eq!(upstream.hits.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn an_unsigned_websocket_upgrade_on_an_optional_path_is_refused() {
+    let (client, upstream, proxy) = setup_with_optional_paths(&["/v1/matches"]).await;
+    let error = tokio_tungstenite::connect_async(websocket_request(&client, &proxy, false))
+        .await
+        .unwrap_err();
+    let tungstenite::Error::Http(response) = error else {
+        panic!("expected an HTTP refusal, got {error}");
+    };
+    assert_eq!(response.status(), 401);
+    assert_eq!(upstream.hits.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
