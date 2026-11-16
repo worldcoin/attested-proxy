@@ -3,8 +3,9 @@
 //!
 //! The sidecar is the service's only ingress. It verifies every request with
 //! `attested-request-tower`, except the exact paths listed as unprotected (the load balancer's
-//! health check), and forwards it to one fixed upstream, tunnelling WebSocket upgrades. Verified
-//! requests reach the upstream with [`PLATFORM_HEADER`], [`KEY_THUMBPRINT_HEADER`] and
+//! health check) and unsigned requests to the exact paths listed as optional (which the upstream
+//! authenticates itself), and forwards it to one fixed upstream, tunnelling WebSocket upgrades.
+//! Only verified requests reach the upstream with [`PLATFORM_HEADER`], [`KEY_THUMBPRINT_HEADER`] and
 //! [`REQUEST_BINDING_HEADER`]; copies sent by a client are removed, as are the signature headers.
 
 use std::{
@@ -45,6 +46,9 @@ pub struct ProxySettings {
     pub upstream: Uri,
     /// Paths forwarded without verification, matched exactly.
     pub unprotected_paths: Vec<String>,
+    /// Paths where a request without any signature header is forwarded unverified, matched
+    /// exactly. Signed requests on these paths are still verified.
+    pub optional_paths: Vec<String>,
     /// Bounds on reading a request body before verification.
     pub body_limits: attested_request_tower::BodyLimits,
     /// Deadline for receiving a request's headers.
@@ -68,6 +72,9 @@ pub struct ProxySettings {
 ///
 /// Returns an error when configuration or local keys are invalid, or either listener fails.
 pub async fn run(config: config::Config) -> anyhow::Result<()> {
+    if let Some(path) = config.conflicting_path() {
+        anyhow::bail!("`{path}` is listed as both an unprotected and an optional path");
+    }
     let issuers::TrustedIssuers { tokens, health } = issuers::TrustedIssuers::new(&config)?;
     let mut verifier = Verifier::builder(tokens, &config.authority)
         .scheme(&config.scheme)

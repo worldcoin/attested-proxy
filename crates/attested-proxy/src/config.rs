@@ -58,6 +58,12 @@ pub struct Config {
     #[arg(long, env = "ATTESTED_PROXY_UNPROTECTED_PATHS", value_delimiter = ',', value_parser = parse_path)]
     pub unprotected_paths: Vec<String>,
 
+    /// Paths where a request carrying none of the signature headers is forwarded unverified,
+    /// comma-separated and matched exactly. Signed requests are verified as on any other path.
+    /// The upstream must authenticate requests that arrive without the identity headers.
+    #[arg(long, env = "ATTESTED_PROXY_OPTIONAL_PATHS", value_delimiter = ',', value_parser = parse_path)]
+    pub optional_paths: Vec<String>,
+
     /// Maximum age of a request's `created`, in seconds.
     #[arg(long, env = "ATTESTED_PROXY_MAX_AGE_SECS", default_value_t = 300)]
     pub max_age_secs: u64,
@@ -169,12 +175,22 @@ impl FromStr for Issuer {
 }
 
 impl Config {
+    /// A path listed as both unprotected and optional, which leaves its handling ambiguous.
+    #[must_use]
+    pub fn conflicting_path(&self) -> Option<&str> {
+        self.optional_paths
+            .iter()
+            .find(|path| self.unprotected_paths.contains(path))
+            .map(String::as_str)
+    }
+
     /// The runtime settings of the proxy server.
     #[must_use]
     pub fn proxy_settings(&self) -> crate::ProxySettings {
         crate::ProxySettings {
             upstream: self.upstream.clone(),
             unprotected_paths: self.unprotected_paths.clone(),
+            optional_paths: self.optional_paths.clone(),
             body_limits: attested_request_tower::BodyLimits {
                 max_bytes: self.max_body_bytes,
                 read_timeout: Duration::from_secs(self.body_read_timeout_secs),
@@ -205,5 +221,42 @@ fn parse_path(value: &str) -> Result<String, String> {
         Ok(value.to_owned())
     } else {
         Err(format!("`{value}` is not an absolute path"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const REQUIRED: [&str; 7] = [
+        "attested-proxy",
+        "--upstream=http://127.0.0.1:8000",
+        "--authority=service.example",
+        "--audiences=service.example",
+        "--issuers=issuer.example=https://issuer.example/jwks.json",
+        "--unprotected-paths=/health,/ready",
+        "--optional-paths=/v1/challenge",
+    ];
+
+    #[test]
+    fn optional_paths_default_to_none() {
+        let config = Config::try_parse_from(&REQUIRED[..5]).unwrap();
+        assert!(config.optional_paths.is_empty());
+        assert!(config.proxy_settings().optional_paths.is_empty());
+    }
+
+    #[test]
+    fn optional_paths_reach_the_proxy_settings() {
+        let config = Config::try_parse_from(REQUIRED).unwrap();
+        assert_eq!(config.conflicting_path(), None);
+        assert_eq!(config.proxy_settings().optional_paths, ["/v1/challenge"]);
+    }
+
+    #[test]
+    fn a_path_cannot_be_both_unprotected_and_optional() {
+        let config =
+            Config::try_parse_from(REQUIRED.into_iter().chain(["--optional-paths=/ready"]))
+                .unwrap();
+        assert_eq!(config.conflicting_path(), Some("/ready"));
     }
 }

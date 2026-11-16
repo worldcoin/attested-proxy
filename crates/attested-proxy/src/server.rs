@@ -19,7 +19,7 @@ use tower::{Layer as _, ServiceExt as _};
 
 use crate::{
     ProxySettings,
-    forward::{ConnectionSlot, Forward, ProxyBody},
+    forward::{ConnectionSlot, Forward, ProxyBody, SIGNATURE_HEADERS, websocket_upgrade},
 };
 
 /// The attested proxy: verifies requests and forwards them to the upstream.
@@ -35,13 +35,14 @@ pub struct Proxy {
 #[derive(Clone)]
 struct Router {
     unprotected_paths: Arc<HashSet<String>>,
+    optional_paths: Arc<HashSet<String>>,
     forward: Forward,
     protected: AttestedRequest<Forward>,
 }
 
 impl Router {
     async fn route(self, request: Request<Incoming>) -> Response<ProxyBody> {
-        if self.unprotected_paths.contains(request.uri().path()) {
+        if self.unprotected_paths.contains(request.uri().path()) || self.is_optional(&request) {
             return self
                 .forward
                 .oneshot(request)
@@ -52,6 +53,25 @@ impl Router {
             Ok(response) => response.map(BodyExt::boxed_unsync),
             Err(never) => match never {},
         }
+    }
+
+    /// Whether `request` may skip verification: it targets an optional path and carries no
+    /// signature header. A partially signed request is verified, and so refused. WebSocket
+    /// upgrades are always verified, since an unverified tunnel would outlive this decision.
+    fn is_optional(&self, request: &Request<Incoming>) -> bool {
+        let Some(path) = self.optional_paths.get(request.uri().path()) else {
+            return false;
+        };
+        let headers = request.headers();
+        let unsigned = !SIGNATURE_HEADERS
+            .iter()
+            .any(|name| headers.contains_key(*name));
+        if !unsigned || websocket_upgrade(headers).is_some() {
+            return false;
+        }
+        metrics::counter!("attested_proxy.optional.unverified", "path" => path.clone())
+            .increment(1);
+        true
     }
 }
 
@@ -75,6 +95,7 @@ impl Proxy {
         Self {
             router: Router {
                 unprotected_paths: Arc::new(settings.unprotected_paths.iter().cloned().collect()),
+                optional_paths: Arc::new(settings.optional_paths.iter().cloned().collect()),
                 forward,
                 protected,
             },
